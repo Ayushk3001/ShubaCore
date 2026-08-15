@@ -15,7 +15,16 @@ enum Role {
 enum LeadSource {
   WHATSAPP
   INSTAGRAM
+  PHONE_CALL
+  OFFLINE
   OTHER
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE_CONSUMPTION
+  ADJUSTMENT
+  RETURN
 }
 
 enum LeadStage {
@@ -92,6 +101,7 @@ model User {
   partnerTransactions        PartnerTransaction[] @relation("PartnerTransactionPartner")
   createdPartnerTransactions PartnerTransaction[] @relation("PartnerTransactionCreatedBy")
   auditLogs                  AuditLog[]           @relation("AuditActor")
+  stockMovements             StockMovement[]      @relation("StockMovementCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -258,3 +268,56 @@ model AuditLog {
   @@index([entityId])
   @@index([createdAt])
 }
+
+model Supplier {
+  id            String    @id @default(cuid())
+  name          String
+  contactPerson String?
+  phone         String
+  email         String?
+  address       String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  products      Product[]
+
+  @@index([name])
+  @@index([phone])
+}
+
+model Product {
+  id             String          @id @default(cuid())
+  name           String
+  sku            String          @unique
+  category       String?
+  unit           String          @default("pcs")
+  currentStock   Int             @default(0)
+  minStock       Int             @default(10)
+  purchaseCost   Decimal         @db.Decimal(12, 2)
+  supplierId     String?
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  stockMovements StockMovement[]
+
+  @@index([sku])
+  @@index([name])
+  @@index([supplierId])
+}
+
+model StockMovement {
+  id          String            @id @default(cuid())
+  productId   String
+  type        StockMovementType
+  quantity    Int
+  reference   String?
+  createdById String?
+  createdAt   DateTime          @default(now())
+  product     Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdBy   User?             @relation("StockMovementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([createdAt])
+}
+

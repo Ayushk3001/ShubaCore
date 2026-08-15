@@ -8,16 +8,21 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? "" });
-const adapter = new PrismaPg(pool);
+function createPrismaClient() {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? "" });
+  const adapter = new PrismaPg(pool);
+  return new PrismaClient({ adapter });
+}
 
+// In dev mode, refresh cached client if new models (e.g. product) are missing from cached instance
+const cachedPrisma = globalForPrisma.prisma;
 export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    adapter,
-  });
+  cachedPrisma && (cachedPrisma as any).product
+    ? cachedPrisma
+    : createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
+
 

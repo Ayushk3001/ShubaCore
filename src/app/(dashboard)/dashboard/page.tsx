@@ -29,7 +29,7 @@ export default async function DashboardPage() {
     prisma.customer.count(),
   ]);
 
-  const allOrders = await prisma.order.findMany({ select: { total: true, status: true } });
+  const allOrders = await prisma.order.findMany({ select: { total: true, status: true, source: true } });
   const totalRevenue = allOrders.reduce((sum, o) => sum + Number(o.total), 0);
   const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -113,7 +113,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Operational Highlights Grid */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 shadow-sm flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-[#edf1e8] text-[#3f563f]">
             <ShoppingBag className="size-5" />
@@ -142,6 +142,33 @@ export default async function DashboardPage() {
             <p className="text-xs font-semibold text-[#6b746c]">Total Clients</p>
             <p className="text-lg font-bold text-[#20231f]">{customers} customers</p>
           </div>
+        </div>
+      </div>
+
+      {/* Acquisition Channels Overview */}
+      <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between border-b border-[#edf1e8] pb-3">
+          <h2 className="text-sm font-bold text-[#20231f]">Acquisition Channels (All 5 Sources)</h2>
+          <Link href="/reports" className="text-xs font-semibold text-[#3f563f] hover:underline flex items-center gap-1">
+            View Analytics Report <ArrowRight className="size-3" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5 pt-1">
+          {[
+            { label: "WhatsApp", key: "WHATSAPP" },
+            { label: "Instagram", key: "INSTAGRAM" },
+            { label: "Phone Call", key: "PHONE_CALL" },
+            { label: "Offline / Walk-in", key: "OFFLINE" },
+            { label: "Other", key: "OTHER" },
+          ].map(({ label, key }) => {
+            const count = allOrders.filter((o) => o.source === key).length;
+            return (
+              <div key={key} className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8]">
+                <span className="text-[11px] font-semibold text-[#5f685e]">{label}</span>
+                <p className="mt-1 text-base font-bold text-[#263326]">{count} Orders</p>
+              </div>
+            );
+          })}
         </div>
       </div>
 

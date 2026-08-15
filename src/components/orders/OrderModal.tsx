@@ -121,6 +121,8 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               >
                 <option value="WHATSAPP">WhatsApp</option>
                 <option value="INSTAGRAM">Instagram</option>
+                <option value="PHONE_CALL">Phone Call</option>
+                <option value="OFFLINE">Offline / Walk-in</option>
                 <option value="OTHER">Other</option>
               </select>
             </div>

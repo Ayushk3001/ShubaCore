@@ -13,6 +13,9 @@ import {
   paymentSchema,
   expenseSchema,
   partnerTransactionSchema,
+  productSchema,
+  supplierSchema,
+  stockMovementSchema,
 } from "@/lib/validations";
 import { Prisma } from "@/generated/prisma/client";
 const Decimal = Prisma.Decimal;
@@ -462,3 +465,163 @@ export async function createPartnerUserAction(formData: { name: string; email: s
   revalidatePath("/settings");
   return { success: true, partner };
 }
+
+// ================= INVENTORY & SUPPLIERS =================
+
+export async function createSupplierAction(formData: unknown) {
+  const user = await requireUser();
+  const parsed = supplierSchema.parse(formData);
+
+  const supplier = await prisma.supplier.create({
+    data: {
+      name: parsed.name,
+      contactPerson: parsed.contactPerson || null,
+      phone: parsed.phone,
+      email: parsed.email || null,
+      address: parsed.address || null,
+      notes: parsed.notes || null,
+    },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "CREATE_SUPPLIER",
+    entityType: "Supplier",
+    entityId: supplier.id,
+    metadata: { name: supplier.name, phone: supplier.phone },
+  });
+
+  revalidatePath("/inventory");
+  return { success: true, supplier };
+}
+
+export async function updateSupplierAction(id: string, formData: unknown) {
+  const user = await requireUser();
+  const parsed = supplierSchema.parse(formData);
+
+  const supplier = await prisma.supplier.update({
+    where: { id },
+    data: {
+      name: parsed.name,
+      contactPerson: parsed.contactPerson || null,
+      phone: parsed.phone,
+      email: parsed.email || null,
+      address: parsed.address || null,
+      notes: parsed.notes || null,
+    },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "UPDATE_SUPPLIER",
+    entityType: "Supplier",
+    entityId: supplier.id,
+  });
+
+  revalidatePath("/inventory");
+  return { success: true, supplier };
+}
+
+export async function createProductAction(formData: unknown) {
+  const user = await requireUser();
+  const parsed = productSchema.parse(formData);
+
+  const product = await prisma.product.create({
+    data: {
+      name: parsed.name,
+      sku: parsed.sku.toUpperCase(),
+      category: parsed.category || null,
+      unit: parsed.unit || "pcs",
+      currentStock: parsed.currentStock,
+      minStock: parsed.minStock,
+      purchaseCost: new Decimal(parsed.purchaseCost),
+      supplierId: parsed.supplierId || null,
+    },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "CREATE_PRODUCT",
+    entityType: "Product",
+    entityId: product.id,
+    metadata: { name: product.name, sku: product.sku, stock: product.currentStock },
+  });
+
+  revalidatePath("/inventory");
+  return { success: true, product };
+}
+
+export async function updateProductAction(id: string, formData: unknown) {
+  const user = await requireUser();
+  const parsed = productSchema.parse(formData);
+
+  const product = await prisma.product.update({
+    where: { id },
+    data: {
+      name: parsed.name,
+      sku: parsed.sku.toUpperCase(),
+      category: parsed.category || null,
+      unit: parsed.unit || "pcs",
+      currentStock: parsed.currentStock,
+      minStock: parsed.minStock,
+      purchaseCost: new Decimal(parsed.purchaseCost),
+      supplierId: parsed.supplierId || null,
+    },
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "UPDATE_PRODUCT",
+    entityType: "Product",
+    entityId: product.id,
+  });
+
+  revalidatePath("/inventory");
+  return { success: true, product };
+}
+
+export async function recordStockMovementAction(formData: unknown) {
+  const user = await requireUser();
+  const parsed = stockMovementSchema.parse(formData);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const movement = await tx.stockMovement.create({
+      data: {
+        productId: parsed.productId,
+        type: parsed.type,
+        quantity: parsed.quantity,
+        reference: parsed.reference || null,
+        createdById: user.id,
+      },
+    });
+
+    // Update product stock based on movement type
+    let stockDelta = parsed.quantity;
+    if (parsed.type === "SALE_CONSUMPTION") {
+      stockDelta = -Math.abs(parsed.quantity);
+    } else if (parsed.type === "PURCHASE" || parsed.type === "RETURN") {
+      stockDelta = Math.abs(parsed.quantity);
+    }
+
+    await tx.product.update({
+      where: { id: parsed.productId },
+      data: {
+        currentStock: { increment: stockDelta },
+      },
+    });
+
+    return movement;
+  });
+
+  await logAudit({
+    actorId: user.id,
+    action: "RECORD_STOCK_MOVEMENT",
+    entityType: "StockMovement",
+    entityId: result.id,
+    metadata: { productId: parsed.productId, type: parsed.type, quantity: parsed.quantity },
+  });
+
+  revalidatePath("/inventory");
+  return { success: true, movement: result };
+}
+

@@ -52,7 +52,7 @@ export function FinanceClient({
       </div>
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between text-[#6b746c]">
             <span className="text-xs font-semibold uppercase tracking-wider">Total Income</span>

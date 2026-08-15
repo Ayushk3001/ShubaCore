@@ -3,7 +3,8 @@ import { moneySchema, requiredStringSchema } from "./shared";
 
 // Enums matching schema.prisma
 export const RoleEnum = z.enum(["PARTNER", "STAFF"]);
-export const LeadSourceEnum = z.enum(["WHATSAPP", "INSTAGRAM", "OTHER"]);
+export const LeadSourceEnum = z.enum(["WHATSAPP", "INSTAGRAM", "PHONE_CALL", "OFFLINE", "OTHER"]);
+export const StockMovementTypeEnum = z.enum(["PURCHASE", "SALE_CONSUMPTION", "ADJUSTMENT", "RETURN"]);
 export const LeadStageEnum = z.enum(["NEW", "CONTACTED", "QUOTED", "NEGOTIATION", "WON", "LOST"]);
 export const OrderStatusEnum = z.enum([
   "NEW",
@@ -140,3 +141,34 @@ export const partnerTransactionSchema = z.object({
   method: PaymentMethodEnum.optional(),
   occurredAt: z.string().optional(),
 });
+
+// Supplier Validation
+export const supplierSchema = z.object({
+  name: requiredStringSchema,
+  contactPerson: z.string().optional(),
+  phone: requiredStringSchema,
+  email: z.string().trim().email().optional().or(z.literal("")),
+  address: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+// Product Validation
+export const productSchema = z.object({
+  name: requiredStringSchema,
+  sku: requiredStringSchema,
+  category: z.string().optional(),
+  unit: z.string().default("pcs"),
+  currentStock: z.coerce.number().int().nonnegative().default(0),
+  minStock: z.coerce.number().int().nonnegative().default(10),
+  purchaseCost: moneySchema,
+  supplierId: z.string().optional(),
+});
+
+// Stock Movement Validation
+export const stockMovementSchema = z.object({
+  productId: requiredStringSchema,
+  type: StockMovementTypeEnum,
+  quantity: z.coerce.number().int(),
+  reference: z.string().optional(),
+});
+

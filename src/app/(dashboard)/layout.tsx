@@ -1,4 +1,3 @@
-import { UserButton } from "@clerk/nextjs";
 import {
   BarChart3,
   CalendarDays,
@@ -16,6 +15,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { requireUser } from "@/lib/auth";
+import { MobileNav } from "@/components/ui/MobileNav";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -39,6 +39,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-[#f6f7f4] text-[#20231f]">
+      {/* Desktop Fixed Sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-[#d8ded2] bg-white px-4 py-5 lg:block">
         <div className="mb-8 flex items-center gap-3 px-2">
           <div className="flex size-10 items-center justify-center rounded-md bg-[#263326] text-white">
@@ -64,16 +65,9 @@ export default async function DashboardLayout({
       </aside>
 
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-[#d8ded2] bg-white/95 px-5 backdrop-blur">
-          <div>
-            <p className="text-sm font-semibold">{user.name}</p>
-            <p className="text-xs text-[#6b746c]">{user.role}</p>
-          </div>
-          <UserButton />
-        </header>
-        <main className="px-5 py-6">{children}</main>
+        <MobileNav user={{ name: user.name, role: user.role }} />
+        <main className="px-3 py-4 sm:px-5 sm:py-6">{children}</main>
       </div>
     </div>
   );
 }
-

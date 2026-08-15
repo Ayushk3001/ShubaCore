@@ -43,7 +43,7 @@ export function PartnersClient({
       </div>
 
       {/* Partners Grid */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {partners.map((partner) => {
           const partnerTx = transactions.filter((t) => t.partnerId === partner.id);
           const investments = partnerTx

@@ -35,11 +35,19 @@ export default async function ReportsPage() {
   });
 
   // Revenue by Source
-  const sources = ["WHATSAPP", "INSTAGRAM", "OTHER"];
+  const sources = ["WHATSAPP", "INSTAGRAM", "PHONE_CALL", "OFFLINE", "OTHER"];
+  const SOURCE_LABELS: Record<string, string> = {
+    WHATSAPP: "WhatsApp",
+    INSTAGRAM: "Instagram",
+    PHONE_CALL: "Phone Call",
+    OFFLINE: "Offline / Walk-in",
+    OTHER: "Other",
+  };
+
   const revenueBySource = sources.map((src) => {
     const srcOrders = orders.filter((o) => o.source === src);
     const rev = srcOrders.reduce((sum, o) => sum + Number(o.total), 0);
-    return { source: src, revenue: rev, count: srcOrders.length };
+    return { source: src, label: SOURCE_LABELS[src] || src, revenue: rev, count: srcOrders.length };
   });
 
   return (
@@ -52,29 +60,29 @@ export default async function ReportsPage() {
       </div>
 
       {/* Top Level P&L */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-[#6b746c]">Gross Order Revenue</p>
-          <p className="mt-2 text-2xl font-bold text-[#20231f]">₹{totalRevenue.toLocaleString()}</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-[#20231f]">₹{totalRevenue.toLocaleString()}</p>
         </div>
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-rose-800">Total Operating Expenses</p>
-          <p className="mt-2 text-2xl font-bold text-rose-900">₹{totalExpenses.toLocaleString()}</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-rose-900">₹{totalExpenses.toLocaleString()}</p>
         </div>
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-blue-800">Net Business Profit</p>
-          <p className="mt-2 text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()}</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()}</p>
         </div>
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-emerald-800">Overall Profit Margin</p>
-          <p className="mt-2 text-2xl font-bold text-emerald-900">{marginPercent}%</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-emerald-900">{marginPercent}%</p>
         </div>
       </div>
 
       {/* Reports Breakdown Grid */}
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
         {/* Revenue by Partner */}
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4">
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-[#edf1e8] pb-3">
             <Users className="size-4 text-[#3f563f]" />
             <h2 className="text-sm font-bold text-[#20231f]">Sales & Revenue by Assigned Partner</h2>
@@ -93,7 +101,7 @@ export default async function ReportsPage() {
         </div>
 
         {/* Revenue by Source */}
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4">
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm space-y-4">
           <div className="flex items-center gap-2 border-b border-[#edf1e8] pb-3">
             <PieChart className="size-4 text-[#3f563f]" />
             <h2 className="text-sm font-bold text-[#20231f]">Revenue by Acquisition Channel</h2>
@@ -103,7 +111,7 @@ export default async function ReportsPage() {
               <div key={item.source} className="flex items-center justify-between text-xs">
                 <div>
                   <span className="rounded bg-[#edf1e8] px-2 py-0.5 font-semibold text-[#3f563f]">
-                    {item.source}
+                    {item.label}
                   </span>
                   <span className="ml-2 text-[#8a948b]">{item.count} Orders</span>
                 </div>
@@ -115,7 +123,7 @@ export default async function ReportsPage() {
       </div>
 
       {/* Expenses Breakdown */}
-      <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4">
+      <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm space-y-4">
         <div className="flex items-center gap-2 border-b border-[#edf1e8] pb-3">
           <BarChart3 className="size-4 text-[#3f563f]" />
           <h2 className="text-sm font-bold text-[#20231f]">Expenses Breakdown by Category</h2>
@@ -123,7 +131,7 @@ export default async function ReportsPage() {
         {expensesByCategory.length === 0 ? (
           <p className="text-xs text-[#8a948b] p-4 text-center">No expenses recorded yet.</p>
         ) : (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
             {expensesByCategory.map((item) => (
               <div key={item.category} className="rounded-lg border border-[#edf1e8] bg-[#f8faf6] p-3">
                 <span className="text-xs font-semibold text-[#4e584f]">{item.category}</span>
