@@ -1,0 +1,260 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PARTNER
+  STAFF
+}
+
+enum LeadSource {
+  WHATSAPP
+  INSTAGRAM
+  OTHER
+}
+
+enum LeadStage {
+  NEW
+  CONTACTED
+  QUOTED
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum OrderStatus {
+  NEW
+  QUOTED
+  CONFIRMED
+  ADVANCE_PAID
+  DESIGNING
+  PRODUCTION
+  READY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentType {
+  ADVANCE
+  PARTIAL
+  FINAL
+  REFUND
+}
+
+enum PaymentMethod {
+  UPI
+  BANK_TRANSFER
+  CASH
+  OTHER
+}
+
+enum ExpenseCategory {
+  MATERIALS
+  PACKAGING
+  PRINTING
+  DELIVERY
+  MARKETING
+  SOFTWARE
+  EQUIPMENT
+  SUPPLIER_PAYMENT
+  MISCELLANEOUS
+}
+
+enum PartnerTransactionType {
+  INITIAL_INVESTMENT
+  ADDITIONAL_INVESTMENT
+  EXPENSE_PAID
+  REIMBURSEMENT
+  WITHDRAWAL
+  OTHER
+}
+
+model User {
+  id                         String               @id @default(cuid())
+  clerkUserId                String               @unique
+  email                      String               @unique
+  name                       String
+  role                       Role                 @default(STAFF)
+  isActive                   Boolean              @default(true)
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+  assignedLeads              Lead[]               @relation("LeadAssignedPartner")
+  assignedOrders             Order[]              @relation("OrderAssignedPartner")
+  receivedPayments           Payment[]            @relation("PaymentReceivedBy")
+  paidExpenses               Expense[]            @relation("ExpensePaidBy")
+  createdExpenses            Expense[]            @relation("ExpenseCreatedBy")
+  partnerTransactions        PartnerTransaction[] @relation("PartnerTransactionPartner")
+  createdPartnerTransactions PartnerTransaction[] @relation("PartnerTransactionCreatedBy")
+  auditLogs                  AuditLog[]           @relation("AuditActor")
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  leads     Lead[]
+  orders    Order[]
+
+  @@index([phone])
+  @@index([name])
+}
+
+model Lead {
+  id                String     @id @default(cuid())
+  leadNumber        String     @unique
+  customerId        String
+  source            LeadSource
+  stage             LeadStage  @default(NEW)
+  eventType         String?
+  eventDate         DateTime?
+  estimatedQuantity Int?
+  estimatedBudget   Decimal?   @db.Decimal(12, 2)
+  quoteAmount       Decimal?   @db.Decimal(12, 2)
+  assignedPartnerId String?
+  requirements      String?
+  notes             String?
+  convertedOrderId  String?    @unique
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  customer          Customer   @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedPartner   User?      @relation("LeadAssignedPartner", fields: [assignedPartnerId], references: [id], onDelete: SetNull)
+  convertedOrder    Order?     @relation("LeadConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
+
+  @@index([source])
+  @@index([stage])
+  @@index([assignedPartnerId])
+  @@index([eventDate])
+}
+
+model Order {
+  id                String        @id @default(cuid())
+  orderNumber       String        @unique
+  customerId        String
+  source            LeadSource
+  assignedPartnerId String?
+  eventType         String?
+  eventDate         DateTime?
+  deliveryDate      DateTime?
+  status            OrderStatus   @default(NEW)
+  subtotal          Decimal       @default(0) @db.Decimal(12, 2)
+  discount          Decimal       @default(0) @db.Decimal(12, 2)
+  total             Decimal       @default(0) @db.Decimal(12, 2)
+  deliveryAddress   String?
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedPartner   User?         @relation("OrderAssignedPartner", fields: [assignedPartnerId], references: [id], onDelete: SetNull)
+  sourceLead        Lead?         @relation("LeadConvertedOrder")
+  items             OrderItem[]
+  payments          Payment[]
+  expenses          Expense[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([assignedPartnerId])
+  @@index([eventDate])
+  @@index([deliveryDate])
+}
+
+model OrderItem {
+  id                   String   @id @default(cuid())
+  orderId              String
+  description          String
+  quantity             Int
+  unitPrice            Decimal  @db.Decimal(12, 2)
+  customizationDetails String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  order                Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  orderId      String
+  amount       Decimal       @db.Decimal(12, 2)
+  type         PaymentType
+  method       PaymentMethod
+  reference    String?
+  receivedById String?
+  paidAt       DateTime
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  receivedBy   User?         @relation("PaymentReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([paidAt])
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  category    ExpenseCategory
+  amount      Decimal         @db.Decimal(12, 2)
+  description String
+  orderId     String?
+  paidById    String?
+  method      PaymentMethod
+  expenseDate DateTime
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  order       Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  paidBy      User?           @relation("ExpensePaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  createdBy   User?           @relation("ExpenseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([expenseDate])
+  @@index([category])
+}
+
+model PartnerTransaction {
+  id          String                 @id @default(cuid())
+  partnerId   String
+  type        PartnerTransactionType
+  amount      Decimal                @db.Decimal(12, 2)
+  description String
+  method      PaymentMethod?
+  occurredAt  DateTime
+  createdById String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  partner     User                   @relation("PartnerTransactionPartner", fields: [partnerId], references: [id], onDelete: Restrict)
+  createdBy   User?                  @relation("PartnerTransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([partnerId])
+  @@index([type])
+  @@index([occurredAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+}
