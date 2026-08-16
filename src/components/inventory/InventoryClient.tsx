@@ -1,27 +1,34 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Package, Layers, Truck, AlertTriangle, Search, Edit2, ArrowUpDown, History } from "lucide-react";
+import { Plus, Package, Layers, AlertTriangle, Search, Edit2, ArrowUpDown, PackageCheck, Trash2 } from "lucide-react";
 import { ProductModal } from "./ProductModal";
 import { SupplierModal } from "./SupplierModal";
 import { StockAdjustModal } from "./StockAdjustModal";
+import { BundleModal } from "./BundleModal";
+import { deleteProductBundleAction } from "@/lib/actions";
+import { calculateBundlePrice, calculateBundleVirtualStock } from "@/lib/bundles";
 
 export function InventoryClient({
   products,
   suppliers,
   stockMovements,
+  bundles = [],
 }: {
   products: Array<any>;
   suppliers: Array<any>;
   stockMovements: Array<any>;
+  bundles?: Array<any>;
 }) {
-  const [activeTab, setActiveTab] = useState<"PRODUCTS" | "SUPPLIERS" | "MOVEMENTS">("PRODUCTS");
+  const [activeTab, setActiveTab] = useState<"PRODUCTS" | "BUNDLES" | "SUPPLIERS" | "MOVEMENTS">("PRODUCTS");
   const [search, setSearch] = useState("");
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+  const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<any | null>(null);
+  const [selectedBundle, setSelectedBundle] = useState<any | null>(null);
 
   const lowStockCount = products.filter((p) => p.currentStock <= p.minStock).length;
   const totalInventoryValue = products.reduce((sum, p) => sum + p.currentStock * Number(p.purchaseCost), 0);
@@ -38,6 +45,12 @@ export function InventoryClient({
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.phone.includes(search) ||
       (s.contactPerson && s.contactPerson.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const filteredBundles = bundles.filter(
+    (b) =>
+      b.name.toLowerCase().includes(search.toLowerCase()) ||
+      b.sku.toLowerCase().includes(search.toLowerCase())
   );
 
   function handleEditProduct(product: any) {
@@ -60,13 +73,29 @@ export function InventoryClient({
     setIsSupplierModalOpen(true);
   }
 
+  function handleCreateBundle() {
+    setSelectedBundle(null);
+    setIsBundleModalOpen(true);
+  }
+
+  function handleEditBundle(bundle: any) {
+    setSelectedBundle(bundle);
+    setIsBundleModalOpen(true);
+  }
+
+  async function handleDeleteBundle(id: string) {
+    if (confirm("Are you sure you want to delete this product combo bundle?")) {
+      await deleteProductBundleAction(id);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Inventory & Suppliers</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Inventory & Bundles</h1>
           <p className="mt-1 text-sm text-[#6b746c]">
-            Track product SKUs, stock levels, unit costs, vendor directory, and stock movements.
+            Track product SKUs, product combos/bundles, stock levels, vendor directory, and stock movements.
           </p>
         </div>
 
@@ -85,6 +114,14 @@ export function InventoryClient({
             >
               <Plus className="size-4" />
               Add Supplier
+            </button>
+          ) : activeTab === "BUNDLES" ? (
+            <button
+              onClick={handleCreateBundle}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#394a39] shadow-sm"
+            >
+              <Plus className="size-4" />
+              Create Combo / Bundle
             </button>
           ) : (
             <button
@@ -105,8 +142,8 @@ export function InventoryClient({
             <Package className="size-5" />
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase text-[#6b746c]">Total Active SKUs</p>
-            <p className="mt-1 text-2xl font-bold text-[#20231f]">{products.length} Products</p>
+            <p className="text-xs font-semibold uppercase text-[#6b746c]">Total Catalog SKUs</p>
+            <p className="mt-1 text-2xl font-bold text-[#20231f]">{products.length} SKUs ({bundles.length} Combos)</p>
           </div>
         </div>
 
@@ -144,7 +181,17 @@ export function InventoryClient({
                 : "bg-white text-[#5f685e] border border-[#d8ded2] hover:bg-[#edf1e8]"
             }`}
           >
-            Product Catalog ({products.length})
+            Standalone SKUs ({products.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("BUNDLES")}
+            className={`rounded-lg px-4 py-2 text-xs font-semibold transition ${
+              activeTab === "BUNDLES"
+                ? "bg-[#263326] text-white shadow-sm"
+                : "bg-white text-[#5f685e] border border-[#d8ded2] hover:bg-[#edf1e8]"
+            }`}
+          >
+            Product Combos / Bundles ({bundles.length})
           </button>
           <button
             onClick={() => setActiveTab("SUPPLIERS")}
@@ -182,7 +229,7 @@ export function InventoryClient({
         )}
       </div>
 
-      {/* Tab: Products */}
+      {/* Tab: Standalone Products */}
       {activeTab === "PRODUCTS" && (
         <div className="overflow-hidden rounded-xl border border-[#d8ded2] bg-white shadow-sm">
           {filteredProducts.length === 0 ? (
@@ -237,6 +284,93 @@ export function InventoryClient({
                           >
                             <Edit2 className="size-4" />
                           </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Product Combos / Bundles */}
+      {activeTab === "BUNDLES" && (
+        <div className="overflow-hidden rounded-xl border border-[#d8ded2] bg-white shadow-sm">
+          {filteredBundles.length === 0 ? (
+            <div className="p-12 text-center text-[#6b746c] text-sm">
+              No product combos/bundles created yet. Click "Create Combo / Bundle" to add your first package.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
+                  <tr>
+                    <th className="px-6 py-3.5">Combo SKU & Name</th>
+                    <th className="px-6 py-3.5">Constituent Products</th>
+                    <th className="px-6 py-3.5">Pricing Strategy</th>
+                    <th className="px-6 py-3.5">Bundle Price</th>
+                    <th className="px-6 py-3.5">Virtual Stock</th>
+                    <th className="px-6 py-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#edf1e8]">
+                  {filteredBundles.map((b) => {
+                    const price = calculateBundlePrice(b.pricingType, b.bundlePrice, b.bundleItems || []);
+                    const vStock = calculateBundleVirtualStock(
+                      (b.bundleItems || []).map((bi: any) => ({
+                        quantity: bi.quantity,
+                        product: { currentStock: bi.product?.currentStock ?? 0 },
+                      }))
+                    );
+
+                    return (
+                      <tr key={b.id} className="hover:bg-[#fbfcf9] transition">
+                        <td className="px-6 py-4">
+                          <span className="font-mono text-xs font-bold text-[#3f563f]">{b.sku}</span>
+                          <p className="font-semibold text-[#20231f]">{b.name}</p>
+                          {b.description && <p className="text-xs text-[#6b746c]">{b.description}</p>}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="space-y-1 text-xs">
+                            {(b.bundleItems || []).map((bi: any) => (
+                              <div key={bi.id} className="flex items-center gap-1.5 text-[#4e584f]">
+                                <span className="font-bold text-[#20231f]">x{bi.quantity}</span>
+                                <span>{bi.product?.name || "Product"}</span>
+                                <span className="text-[10px] text-[#8a948b]">({bi.product?.currentStock ?? 0} avail)</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-xs">
+                          <span className="rounded bg-[#edf1e8] px-2 py-0.5 font-semibold text-[#3f563f]">
+                            {b.pricingType === "FIXED" ? "Fixed Price" : "Dynamic Sum"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-xs font-bold text-[#20231f]">
+                          ₹{price.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-xs">
+                          <span className={`font-bold ${vStock > 0 ? "text-emerald-900" : "text-rose-700"}`}>
+                            {vStock} Combos
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleEditBundle(b)}
+                              className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
+                            >
+                              <Edit2 className="size-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBundle(b.id)}
+                              className="inline-flex items-center gap-1 rounded-md p-1.5 text-rose-600 hover:bg-rose-50"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -379,6 +513,13 @@ export function InventoryClient({
         products={products}
         isOpen={isStockModalOpen}
         onClose={() => setIsStockModalOpen(false)}
+      />
+
+      <BundleModal
+        bundle={selectedBundle}
+        products={products}
+        isOpen={isBundleModalOpen}
+        onClose={() => setIsBundleModalOpen(false)}
       />
     </div>
   );

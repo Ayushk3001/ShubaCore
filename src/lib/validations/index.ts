@@ -98,8 +98,32 @@ export const leadConversionSchema = z.object({
     .min(1, "At least one item is required for an order"),
 });
 
+export const BundlePricingTypeEnum = z.enum(["FIXED", "DYNAMIC_SUM"]);
+
+// Bundle Item Validation
+export const bundleItemSchema = z.object({
+  productId: requiredStringSchema,
+  quantity: z.coerce.number().int().min(1, "Quantity must be at least 1"),
+});
+
+// Bundle Validation
+export const bundleSchema = z.object({
+  name: requiredStringSchema,
+  sku: requiredStringSchema,
+  description: optionalStringSchema,
+  pricingType: BundlePricingTypeEnum.default("DYNAMIC_SUM"),
+  bundlePrice: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) ? undefined : Number(val)),
+    positiveMoneySchema.optional()
+  ),
+  isActive: z.boolean().optional().default(true),
+  items: z.array(bundleItemSchema).min(1, "A product bundle must contain at least 1 component product"),
+});
+
 // Order Item Validation
 export const orderItemSchema = z.object({
+  productId: optionalStringSchema,
+  bundleId: optionalStringSchema,
   description: requiredStringSchema,
   quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
   unitPrice: moneySchema,

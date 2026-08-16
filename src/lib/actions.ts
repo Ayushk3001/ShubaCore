@@ -17,8 +17,10 @@ import {
   productSchema,
   supplierSchema,
   stockMovementSchema,
+  bundleSchema,
 } from "@/lib/validations";
 import { Prisma } from "@/generated/prisma/client";
+import { serializeData } from "@/lib/serialize";
 const Decimal = Prisma.Decimal;
 
 function formatError(err: unknown, defaultMessage: string): { success: false; error: string } {
@@ -286,13 +288,23 @@ export async function convertLeadToOrderAction(formData: unknown) {
     revalidatePath("/leads");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
-    return { success: true as const, order };
+    return { success: true as const, order: serializeData(order) };
   } catch (err) {
     return formatError(err, "Failed to convert lead to order.");
   }
 }
 
 // ================= ORDERS =================
+
+const FULFILLMENT_STATUSES = [
+  "CONFIRMED",
+  "ADVANCE_PAID",
+  "DESIGNING",
+  "PRODUCTION",
+  "READY",
+  "DELIVERED",
+  "COMPLETED",
+];
 
 export async function createOrderAction(formData: unknown) {
   try {
@@ -306,30 +318,96 @@ export async function createOrderAction(formData: unknown) {
     );
     const total = Math.max(0, subtotal - (parsed.discount || 0));
 
-    const order = await prisma.order.create({
-      data: {
-        orderNumber,
-        customerId: parsed.customerId,
-        source: parsed.source,
-        assignedPartnerId: parsed.assignedPartnerId || null,
-        eventType: parsed.eventType || null,
-        eventDate: parsed.eventDate ? new Date(parsed.eventDate) : null,
-        deliveryDate: parsed.deliveryDate ? new Date(parsed.deliveryDate) : null,
-        status: parsed.status || "NEW",
-        subtotal: new Decimal(subtotal),
-        discount: new Decimal(parsed.discount || 0),
-        total: new Decimal(total),
-        deliveryAddress: parsed.deliveryAddress || null,
-        notes: parsed.notes || null,
-        items: {
-          create: parsed.items.map((item) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: new Decimal(item.unitPrice),
-            customizationDetails: item.customizationDetails || null,
-          })),
+    const orderStatus = parsed.status || "NEW";
+    const isFulfilled = FULFILLMENT_STATUSES.includes(orderStatus);
+
+    const order = await prisma.$transaction(async (tx) => {
+      // Stock verification and deduction if order is created in an active fulfillment status
+      if (isFulfilled) {
+        for (const item of parsed.items) {
+          if (item.bundleId) {
+            const bundle = await tx.productBundle.findUnique({
+              where: { id: item.bundleId },
+              include: { bundleItems: { include: { product: true } } },
+            });
+            if (bundle) {
+              for (const bItem of bundle.bundleItems) {
+                const requiredQty = bItem.quantity * item.quantity;
+                if (bItem.product.currentStock < requiredQty) {
+                  throw new Error(
+                    `Insufficient stock for component product "${bItem.product.name}" in combo "${bundle.name}". Required: ${requiredQty}, Available: ${bItem.product.currentStock}`
+                  );
+                }
+                await tx.product.update({
+                  where: { id: bItem.productId },
+                  data: { currentStock: { decrement: requiredQty } },
+                });
+                await tx.stockMovement.create({
+                  data: {
+                    productId: bItem.productId,
+                    type: "SALE_CONSUMPTION",
+                    quantity: requiredQty,
+                    reference: `Order ${orderNumber} (Combo: ${bundle.name} x${item.quantity}) - Status: ${orderStatus}`,
+                    createdById: user.id,
+                  },
+                });
+              }
+            }
+          } else if (item.productId) {
+            const product = await tx.product.findUnique({
+              where: { id: item.productId },
+            });
+            if (product) {
+              if (product.currentStock < item.quantity) {
+                throw new Error(
+                  `Insufficient stock for product "${product.name}". Required: ${item.quantity}, Available: ${product.currentStock}`
+                );
+              }
+              await tx.product.update({
+                where: { id: item.productId },
+                data: { currentStock: { decrement: item.quantity } },
+              });
+              await tx.stockMovement.create({
+                data: {
+                  productId: item.productId,
+                  type: "SALE_CONSUMPTION",
+                  quantity: item.quantity,
+                  reference: `Order ${orderNumber} - Status: ${orderStatus}`,
+                  createdById: user.id,
+                },
+              });
+            }
+          }
+        }
+      }
+
+      return tx.order.create({
+        data: {
+          orderNumber,
+          customerId: parsed.customerId,
+          source: parsed.source,
+          assignedPartnerId: parsed.assignedPartnerId || null,
+          eventType: parsed.eventType || null,
+          eventDate: parsed.eventDate ? new Date(parsed.eventDate) : null,
+          deliveryDate: parsed.deliveryDate ? new Date(parsed.deliveryDate) : null,
+          status: orderStatus,
+          subtotal: new Decimal(subtotal),
+          discount: new Decimal(parsed.discount || 0),
+          total: new Decimal(total),
+          deliveryAddress: parsed.deliveryAddress || null,
+          notes: parsed.notes || null,
+          items: {
+            create: parsed.items.map((item) => ({
+              productId: item.productId || null,
+              bundleId: item.bundleId || null,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: new Decimal(item.unitPrice),
+              customizationDetails: item.customizationDetails || null,
+            })),
+          },
         },
-      },
+      });
     });
 
     await logAudit({
@@ -337,12 +415,13 @@ export async function createOrderAction(formData: unknown) {
       action: "CREATE_ORDER",
       entityType: "Order",
       entityId: order.id,
-      metadata: { orderNumber: order.orderNumber, total },
+      metadata: { orderNumber: order.orderNumber, total, status: order.status },
     });
 
     revalidatePath("/orders");
+    revalidatePath("/inventory");
     revalidatePath("/dashboard");
-    return { success: true as const, order };
+    return { success: true as const, order: serializeData(order) };
   } catch (err) {
     return formatError(err, "Failed to create order.");
   }
@@ -380,6 +459,8 @@ export async function updateOrderAction(id: string, formData: unknown) {
           notes: parsed.notes || null,
           items: {
             create: parsed.items.map((item) => ({
+              productId: item.productId || null,
+              bundleId: item.bundleId || null,
               description: item.description,
               quantity: item.quantity,
               unitPrice: new Decimal(item.unitPrice),
@@ -399,8 +480,9 @@ export async function updateOrderAction(id: string, formData: unknown) {
     });
 
     revalidatePath("/orders");
+    revalidatePath("/inventory");
     revalidatePath("/dashboard");
-    return { success: true as const, order };
+    return { success: true as const, order: serializeData(order) };
   } catch (err) {
     return formatError(err, "Failed to update order.");
   }
@@ -411,22 +493,135 @@ export async function updateOrderStatusAction(formData: unknown) {
     const user = await requireUser();
     const parsed = orderStatusUpdateSchema.parse(formData);
 
-    const order = await prisma.order.update({
+    const existingOrder = await prisma.order.findUnique({
       where: { id: parsed.orderId },
-      data: { status: parsed.status },
+      include: {
+        items: {
+          include: {
+            product: true,
+            bundle: {
+              include: {
+                bundleItems: {
+                  include: { product: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!existingOrder) {
+      return { success: false, error: "Order not found." };
+    }
+
+    const wasFulfilled = FULFILLMENT_STATUSES.includes(existingOrder.status);
+    const isNowFulfilled = FULFILLMENT_STATUSES.includes(parsed.status);
+
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      // Transition from non-fulfilled state (e.g. NEW/QUOTED) to active fulfillment state (e.g. PRODUCTION/DELIVERED/COMPLETED)
+      if (!wasFulfilled && isNowFulfilled) {
+        for (const item of existingOrder.items) {
+          if (item.bundleId && item.bundle) {
+            for (const bItem of item.bundle.bundleItems) {
+              const requiredQty = bItem.quantity * item.quantity;
+              if (bItem.product.currentStock < requiredQty) {
+                throw new Error(
+                  `Insufficient stock for component product "${bItem.product.name}" in combo "${item.bundle.name}". Required: ${requiredQty}, Available: ${bItem.product.currentStock}`
+                );
+              }
+              await tx.product.update({
+                where: { id: bItem.productId },
+                data: { currentStock: { decrement: requiredQty } },
+              });
+              await tx.stockMovement.create({
+                data: {
+                  productId: bItem.productId,
+                  type: "SALE_CONSUMPTION",
+                  quantity: requiredQty,
+                  reference: `Order ${existingOrder.orderNumber} (Combo: ${item.bundle.name} x${item.quantity}) - Status: ${parsed.status}`,
+                  createdById: user.id,
+                },
+              });
+            }
+          } else if (item.productId && item.product) {
+            if (item.product.currentStock < item.quantity) {
+              throw new Error(
+                `Insufficient stock for product "${item.product.name}". Required: ${item.quantity}, Available: ${item.product.currentStock}`
+              );
+            }
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { currentStock: { decrement: item.quantity } },
+            });
+            await tx.stockMovement.create({
+              data: {
+                productId: item.productId,
+                type: "SALE_CONSUMPTION",
+                quantity: item.quantity,
+                reference: `Order ${existingOrder.orderNumber} - Status: ${parsed.status}`,
+                createdById: user.id,
+              },
+            });
+          }
+        }
+      }
+      // Transition to CANCELLED from fulfilled state -> restore stock
+      else if (wasFulfilled && parsed.status === "CANCELLED") {
+        for (const item of existingOrder.items) {
+          if (item.bundleId && item.bundle) {
+            for (const bItem of item.bundle.bundleItems) {
+              const qtyToRestore = bItem.quantity * item.quantity;
+              await tx.product.update({
+                where: { id: bItem.productId },
+                data: { currentStock: { increment: qtyToRestore } },
+              });
+              await tx.stockMovement.create({
+                data: {
+                  productId: bItem.productId,
+                  type: "RETURN",
+                  quantity: qtyToRestore,
+                  reference: `Order ${existingOrder.orderNumber} Cancelled (Combo: ${item.bundle.name} x${item.quantity})`,
+                  createdById: user.id,
+                },
+              });
+            }
+          } else if (item.productId && item.product) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { currentStock: { increment: item.quantity } },
+            });
+            await tx.stockMovement.create({
+              data: {
+                productId: item.productId,
+                type: "RETURN",
+                quantity: item.quantity,
+                reference: `Order ${existingOrder.orderNumber} Cancelled`,
+                createdById: user.id,
+              },
+            });
+          }
+        }
+      }
+
+      return tx.order.update({
+        where: { id: parsed.orderId },
+        data: { status: parsed.status },
+      });
     });
 
     await logAudit({
       actorId: user.id,
       action: "UPDATE_ORDER_STATUS",
       entityType: "Order",
-      entityId: order.id,
-      metadata: { status: parsed.status },
+      entityId: updatedOrder.id,
+      metadata: { status: parsed.status, previousStatus: existingOrder.status },
     });
 
     revalidatePath("/orders");
+    revalidatePath("/inventory");
     revalidatePath("/dashboard");
-    return { success: true as const, order };
+    return { success: true as const, order: serializeData(updatedOrder) };
   } catch (err) {
     return formatError(err, "Failed to update order status.");
   }
@@ -475,7 +670,7 @@ export async function createPaymentAction(formData: unknown) {
     revalidatePath("/orders");
     revalidatePath("/finance");
     revalidatePath("/dashboard");
-    return { success: true as const, payment };
+    return { success: true as const, payment: serializeData(payment) };
   } catch (err) {
     return formatError(err, "Failed to record payment.");
   }
@@ -509,7 +704,7 @@ export async function updatePaymentAction(id: string, formData: unknown) {
     revalidatePath("/orders");
     revalidatePath("/finance");
     revalidatePath("/dashboard");
-    return { success: true as const, payment };
+    return { success: true as const, payment: serializeData(payment) };
   } catch (err) {
     return formatError(err, "Failed to update payment.");
   }
@@ -546,7 +741,7 @@ export async function createExpenseAction(formData: unknown) {
     revalidatePath("/finance");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
-    return { success: true as const, expense };
+    return { success: true as const, expense: serializeData(expense) };
   } catch (err) {
     return formatError(err, "Failed to record expense.");
   }
@@ -580,7 +775,7 @@ export async function updateExpenseAction(id: string, formData: unknown) {
     revalidatePath("/finance");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
-    return { success: true as const, expense };
+    return { success: true as const, expense: serializeData(expense) };
   } catch (err) {
     return formatError(err, "Failed to update expense.");
   }
@@ -615,7 +810,7 @@ export async function createPartnerTransactionAction(formData: unknown) {
 
     revalidatePath("/partners");
     revalidatePath("/dashboard");
-    return { success: true as const, transaction };
+    return { success: true as const, transaction: serializeData(transaction) };
   } catch (err) {
     return formatError(err, "Failed to record partner transaction.");
   }
@@ -647,7 +842,7 @@ export async function updatePartnerTransactionAction(id: string, formData: unkno
 
     revalidatePath("/partners");
     revalidatePath("/dashboard");
-    return { success: true as const, transaction };
+    return { success: true as const, transaction: serializeData(transaction) };
   } catch (err) {
     return formatError(err, "Failed to update partner transaction.");
   }
@@ -808,7 +1003,7 @@ export async function createProductAction(formData: unknown) {
     });
 
     revalidatePath("/inventory");
-    return { success: true as const, product };
+    return { success: true as const, product: serializeData(product) };
   } catch (err) {
     return formatError(err, "Failed to create product.");
   }
@@ -841,7 +1036,7 @@ export async function updateProductAction(id: string, formData: unknown) {
     });
 
     revalidatePath("/inventory");
-    return { success: true as const, product };
+    return { success: true as const, product: serializeData(product) };
   } catch (err) {
     return formatError(err, "Failed to update product.");
   }
@@ -889,8 +1084,144 @@ export async function recordStockMovementAction(formData: unknown) {
     });
 
     revalidatePath("/inventory");
-    return { success: true as const, movement: result };
+    return { success: true as const, movement: serializeData(result) };
   } catch (err) {
     return formatError(err, "Failed to record stock movement.");
+  }
+}
+
+// ================= PRODUCT BUNDLES (COMBOS) =================
+
+export async function createProductBundleAction(formData: unknown) {
+  try {
+    const user = await requireUser();
+    const parsed = bundleSchema.parse(formData);
+
+    const bundle = await prisma.$transaction(async (tx) => {
+      return tx.productBundle.create({
+        data: {
+          name: parsed.name,
+          sku: parsed.sku.toUpperCase(),
+          description: parsed.description || null,
+          pricingType: parsed.pricingType,
+          bundlePrice: parsed.bundlePrice !== undefined ? new Decimal(parsed.bundlePrice) : null,
+          isActive: parsed.isActive ?? true,
+          bundleItems: {
+            create: parsed.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+            })),
+          },
+        },
+        include: {
+          bundleItems: {
+            include: { product: true },
+          },
+        },
+      });
+    });
+
+    await logAudit({
+      actorId: user.id,
+      action: "CREATE_PRODUCT_BUNDLE",
+      entityType: "ProductBundle",
+      entityId: bundle.id,
+      metadata: { name: bundle.name, sku: bundle.sku },
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath("/orders");
+    return { success: true as const, bundle: serializeData(bundle) };
+  } catch (err) {
+    return formatError(err, "Failed to create product bundle.");
+  }
+}
+
+export async function updateProductBundleAction(id: string, formData: unknown) {
+  try {
+    const user = await requireUser();
+    const parsed = bundleSchema.parse(formData);
+
+    const bundle = await prisma.$transaction(async (tx) => {
+      await tx.bundleItem.deleteMany({ where: { bundleId: id } });
+
+      return tx.productBundle.update({
+        where: { id },
+        data: {
+          name: parsed.name,
+          sku: parsed.sku.toUpperCase(),
+          description: parsed.description || null,
+          pricingType: parsed.pricingType,
+          bundlePrice: parsed.bundlePrice !== undefined ? new Decimal(parsed.bundlePrice) : null,
+          isActive: parsed.isActive ?? true,
+          bundleItems: {
+            create: parsed.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+            })),
+          },
+        },
+        include: {
+          bundleItems: {
+            include: { product: true },
+          },
+        },
+      });
+    });
+
+    await logAudit({
+      actorId: user.id,
+      action: "UPDATE_PRODUCT_BUNDLE",
+      entityType: "ProductBundle",
+      entityId: bundle.id,
+      metadata: { name: bundle.name, sku: bundle.sku },
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath("/orders");
+    return { success: true as const, bundle: serializeData(bundle) };
+  } catch (err) {
+    return formatError(err, "Failed to update product bundle.");
+  }
+}
+
+export async function deleteProductBundleAction(id: string) {
+  try {
+    const user = await requireUser();
+
+    const bundle = await prisma.productBundle.delete({
+      where: { id },
+    });
+
+    await logAudit({
+      actorId: user.id,
+      action: "DELETE_PRODUCT_BUNDLE",
+      entityType: "ProductBundle",
+      entityId: id,
+      metadata: { name: bundle.name, sku: bundle.sku },
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath("/orders");
+    return { success: true as const, id };
+  } catch (err) {
+    return formatError(err, "Failed to delete product bundle.");
+  }
+}
+
+export async function getBundlesAction() {
+  try {
+    await requireUser();
+    const bundles = await prisma.productBundle.findMany({
+      orderBy: { name: "asc" },
+      include: {
+        bundleItems: {
+          include: { product: true },
+        },
+      },
+    });
+    return { success: true as const, bundles: serializeData(bundles) };
+  } catch (err) {
+    return formatError(err, "Failed to fetch product bundles.");
   }
 }

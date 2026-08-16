@@ -84,6 +84,11 @@ enum PartnerTransactionType {
   OTHER
 }
 
+enum BundlePricingType {
+  FIXED
+  DYNAMIC_SUM
+}
+
 model User {
   id                         String               @id @default(cuid())
   clerkUserId                String               @unique
@@ -181,17 +186,23 @@ model Order {
 }
 
 model OrderItem {
-  id                   String   @id @default(cuid())
+  id                   String         @id @default(cuid())
   orderId              String
+  productId            String?
+  bundleId             String?
   description          String
   quantity             Int
-  unitPrice            Decimal  @db.Decimal(12, 2)
+  unitPrice            Decimal        @db.Decimal(12, 2)
   customizationDetails String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  order                Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  order                Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  product              Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
+  bundle               ProductBundle? @relation(fields: [bundleId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
+  @@index([productId])
+  @@index([bundleId])
 }
 
 model Payment {
@@ -300,6 +311,8 @@ model Product {
   updatedAt      DateTime        @updatedAt
   supplier       Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   stockMovements StockMovement[]
+  bundleItems    BundleItem[]
+  orderItems     OrderItem[]
 
   @@index([sku])
   @@index([name])
@@ -319,5 +332,35 @@ model StockMovement {
 
   @@index([productId])
   @@index([createdAt])
+}
+
+model ProductBundle {
+  id          String            @id @default(cuid())
+  name        String
+  sku         String            @unique
+  description String?
+  pricingType BundlePricingType @default(DYNAMIC_SUM)
+  bundlePrice Decimal?          @db.Decimal(12, 2)
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  bundleItems BundleItem[]
+  orderItems  OrderItem[]
+
+  @@index([sku])
+  @@index([name])
+}
+
+model BundleItem {
+  id        String        @id @default(cuid())
+  bundleId  String
+  productId String
+  quantity  Int           @default(1)
+  createdAt DateTime      @default(now())
+  bundle    ProductBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([bundleId])
+  @@index([productId])
 }
 

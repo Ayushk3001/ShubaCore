@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, DollarSign, TrendingUp, CreditCard, Receipt, CheckCircle, Clock, MapPin, Tag, Edit } from "lucide-react";
+import { X, DollarSign, TrendingUp, CreditCard, Receipt, CheckCircle, Clock, MapPin, Tag, Edit, PackageCheck } from "lucide-react";
 import { updateOrderStatusAction } from "@/lib/actions";
 
 interface OrderDetailModalProps {
@@ -23,7 +23,25 @@ interface OrderDetailModalProps {
     deliveryDate: Date | null;
     customer: { name: string; phone: string; email: string | null };
     assignedPartner: { name: string } | null;
-    items: Array<{ id: string; description: string; quantity: number; unitPrice: any; customizationDetails: string | null }>;
+    items: Array<{
+      id: string;
+      productId?: string | null;
+      bundleId?: string | null;
+      description: string;
+      quantity: number;
+      unitPrice: any;
+      customizationDetails: string | null;
+      bundle?: {
+        name: string;
+        sku: string;
+        bundleItems: Array<{
+          id: string;
+          quantity: number;
+          product: { name: string; sku: string; unit: string };
+        }>;
+      } | null;
+      product?: { name: string; sku: string; unit: string } | null;
+    }>;
     payments: Array<{ id: string; amount: any; type: string; method: string; paidAt: Date; reference: string | null }>;
     expenses: Array<{ id: string; category: string; amount: any; description: string; expenseDate: Date }>;
   } | null;
@@ -47,6 +65,7 @@ const ORDER_STATUSES = [
 
 export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetailModalProps) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   if (!isOpen || !order) return null;
 
@@ -60,10 +79,14 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
   async function handleStatusChange(newStatus: string) {
     if (!order) return;
     setLoading(true);
+    setError("");
     try {
-      await updateOrderStatusAction({ orderId: order.id, status: newStatus });
-    } catch (e) {
-      console.error(e);
+      const res = await updateOrderStatusAction({ orderId: order.id, status: newStatus });
+      if (!res.success) {
+        setError(res.error || "Failed to update order status.");
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to update order status.");
     } finally {
       setLoading(false);
     }
@@ -103,6 +126,12 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
             </button>
           </div>
         </div>
+
+        {error && (
+          <div className="mt-4 rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-600 border border-red-200">
+            ⚠️ {error}
+          </div>
+        )}
 
         {/* Status Lifecycle Stepper */}
         <div className="mt-4 rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8]">
@@ -153,22 +182,38 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
         {/* Order Details & Items */}
         <div className="mt-5 space-y-4">
           <div>
-            <h3 className="text-xs font-semibold uppercase text-[#5f685e] tracking-wider mb-2">Order Line Items</h3>
+            <h3 className="text-xs font-semibold uppercase text-[#5f685e] tracking-wider mb-2">Order Line Items & Packing Breakdown</h3>
             <div className="divide-y divide-[#edf1e8] rounded-lg border border-[#d8ded2] bg-white">
               {order.items.map((item) => (
-                <div key={item.id} className="p-3 flex items-center justify-between text-xs">
-                  <div>
-                    <p className="font-semibold text-[#20231f]">{item.description}</p>
-                    {item.customizationDetails && (
-                      <p className="text-[#6b746c] mt-0.5">Details: {item.customizationDetails}</p>
-                    )}
+                <div key={item.id} className="p-3 space-y-2 text-xs">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-[#20231f]">{item.description}</p>
+                      {item.customizationDetails && (
+                        <p className="text-[#6b746c] mt-0.5">Details: {item.customizationDetails}</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-medium text-[#20231f]">
+                        {item.quantity} × ₹{Number(item.unitPrice).toLocaleString()}
+                      </p>
+                      <p className="font-bold text-[#263326]">₹{(item.quantity * Number(item.unitPrice)).toLocaleString()}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-medium text-[#20231f]">
-                      {item.quantity} × ₹{Number(item.unitPrice).toLocaleString()}
-                    </p>
-                    <p className="font-bold text-[#263326]">₹{(item.quantity * Number(item.unitPrice)).toLocaleString()}</p>
-                  </div>
+
+                  {item.bundle && item.bundle.bundleItems && (
+                    <div className="rounded bg-[#f8faf6] p-2.5 border border-[#edf1e8] space-y-1">
+                      <p className="text-[11px] font-bold text-[#3f563f] flex items-center gap-1">
+                        <PackageCheck className="size-3.5" /> Combo Packing Slip Breakdown ({item.bundle.name}):
+                      </p>
+                      {item.bundle.bundleItems.map((bi) => (
+                        <div key={bi.id} className="text-[11px] text-[#4e584f] flex justify-between pl-4">
+                          <span>• {bi.product.name} ({bi.product.sku})</span>
+                          <span className="font-semibold text-[#20231f]">Total to pack: {bi.quantity * item.quantity} {bi.product.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

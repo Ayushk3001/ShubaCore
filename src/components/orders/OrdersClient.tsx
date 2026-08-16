@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Filter, ShoppingBag, Eye, Calendar, UserCheck, Edit } from "lucide-react";
+import { Plus, Search, Filter, ShoppingBag, Eye, Calendar, UserCheck, Edit, Loader2 } from "lucide-react";
 import { OrderModal } from "./OrderModal";
 import { OrderDetailModal } from "./OrderDetailModal";
+import { updateOrderStatusAction } from "@/lib/actions";
 
 type OrderWithRelations = {
   id: string;
@@ -23,7 +24,17 @@ type OrderWithRelations = {
   deliveryDate: Date | null;
   customer: { name: string; phone: string; email: string | null };
   assignedPartner: { name: string } | null;
-  items: Array<{ id: string; description: string; quantity: number; unitPrice: any; customizationDetails: string | null }>;
+  items: Array<{
+    id: string;
+    productId?: string | null;
+    bundleId?: string | null;
+    description: string;
+    quantity: number;
+    unitPrice: any;
+    customizationDetails: string | null;
+    bundle?: any;
+    product?: any;
+  }>;
   payments: Array<{ id: string; amount: any; type: string; method: string; paidAt: Date; reference: string | null }>;
   expenses: Array<{ id: string; category: string; amount: any; description: string; expenseDate: Date }>;
 };
@@ -45,16 +56,37 @@ export function OrdersClient({
   orders,
   customers,
   partners,
+  products = [],
+  bundles = [],
 }: {
   orders: OrderWithRelations[];
   customers: Array<{ id: string; name: string; phone: string }>;
   partners: Array<{ id: string; name: string }>;
+  products?: Array<{ id: string; name: string; sku: string; purchaseCost: any; currentStock: number }>;
+  bundles?: Array<any>;
 }) {
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<OrderWithRelations | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderWithRelations | null>(null);
+  const [statusLoadingId, setStatusLoadingId] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string>("");
+
+  async function handleStatusChange(orderId: string, newStatus: string) {
+    setStatusLoadingId(orderId);
+    setStatusError("");
+    try {
+      const res = await updateOrderStatusAction({ orderId, status: newStatus });
+      if (!res.success) {
+        setStatusError(res.error || "Failed to update order status.");
+      }
+    } catch (err: any) {
+      setStatusError(err.message || "Failed to update order status.");
+    } finally {
+      setStatusLoadingId(null);
+    }
+  }
 
   const filteredOrders = orders.filter((o) => {
     const matchesStatus = selectedStatus === "ALL" || o.status === selectedStatus;
@@ -71,7 +103,7 @@ export function OrdersClient({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Orders Management</h1>
           <p className="mt-1 text-sm text-[#6b746c]">
-            Track order lifecycle, line items, advance payments, expenses, and profitability.
+            Track order lifecycle, change order statuses, auto-update inventory stock, and manage payments.
           </p>
         </div>
         <button
@@ -85,6 +117,12 @@ export function OrdersClient({
           Create Order
         </button>
       </div>
+
+      {statusError && (
+        <div className="rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-600 border border-red-200">
+          ⚠️ {statusError}
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex flex-wrap items-center gap-2 border-b border-[#d8ded2] pb-3">
@@ -142,14 +180,13 @@ export function OrdersClient({
                   <th className="px-6 py-3.5">Delivery Date</th>
                   <th className="px-6 py-3.5">Financial Summary</th>
                   <th className="px-6 py-3.5">Partner</th>
-                  <th className="px-6 py-3.5">Status</th>
+                  <th className="px-6 py-3.5">Change Order Status</th>
                   <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#edf1e8]">
                 {filteredOrders.map((order) => {
                   const totalPaid = order.payments.reduce((s, p) => s + Number(p.amount), 0);
-                  const totalExpenses = order.expenses.reduce((s, e) => s + Number(e.amount), 0);
                   const balance = Number(order.total) - totalPaid;
 
                   return (
@@ -186,9 +223,28 @@ export function OrdersClient({
                         {order.assignedPartner?.name || "Unassigned"}
                       </td>
                       <td className="px-6 py-4">
-                        <span className="rounded-md bg-[#edf1e8] px-2.5 py-1 text-xs font-semibold text-[#263326]">
-                          {order.status}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {statusLoadingId === order.id ? (
+                            <Loader2 className="size-4 animate-spin text-[#3f563f]" />
+                          ) : (
+                            <select
+                              value={order.status}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                              className="rounded-md border border-[#d8ded2] bg-[#edf1e8] px-2 py-1 text-xs font-semibold text-[#263326] focus:border-[#3f563f] focus:outline-none cursor-pointer"
+                            >
+                              <option value="NEW">NEW</option>
+                              <option value="QUOTED">QUOTED</option>
+                              <option value="CONFIRMED">CONFIRMED</option>
+                              <option value="ADVANCE_PAID">ADVANCE_PAID</option>
+                              <option value="DESIGNING">DESIGNING</option>
+                              <option value="PRODUCTION">PRODUCTION</option>
+                              <option value="READY">READY</option>
+                              <option value="DELIVERED">DELIVERED</option>
+                              <option value="COMPLETED">COMPLETED</option>
+                              <option value="CANCELLED">CANCELLED</option>
+                            </select>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -221,6 +277,8 @@ export function OrdersClient({
         order={editingOrder}
         customers={customers}
         partners={partners}
+        products={products}
+        bundles={bundles}
         isOpen={isCreateModalOpen || Boolean(editingOrder)}
         onClose={() => {
           setIsCreateModalOpen(false);
