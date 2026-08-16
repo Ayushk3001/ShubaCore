@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { FinanceClient } from "@/components/finance/FinanceClient";
+import { serializeData } from "@/lib/serialize";
 
 export default async function FinancePage() {
   await requireUser();
@@ -36,10 +37,10 @@ export default async function FinancePage() {
 
   return (
     <FinanceClient
-      payments={payments as any}
-      expenses={expenses as any}
-      orders={orders as any}
-      partners={partners}
+      payments={serializeData(payments) as any}
+      expenses={serializeData(expenses) as any}
+      orders={serializeData(orders) as any}
+      partners={serializeData(partners)}
     />
   );
 }

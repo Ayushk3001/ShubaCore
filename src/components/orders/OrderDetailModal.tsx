@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { X, DollarSign, TrendingUp, CreditCard, Receipt, CheckCircle, Clock, MapPin, Tag } from "lucide-react";
+import { X, DollarSign, TrendingUp, CreditCard, Receipt, CheckCircle, Clock, MapPin, Tag, Edit } from "lucide-react";
 import { updateOrderStatusAction } from "@/lib/actions";
 
 interface OrderDetailModalProps {
   order: {
     id: string;
     orderNumber: string;
+    customerId: string;
+    source: string;
+    assignedPartnerId: string | null;
     status: string;
     subtotal: any;
     discount: any;
@@ -15,6 +18,7 @@ interface OrderDetailModalProps {
     deliveryAddress: string | null;
     notes: string | null;
     createdAt: Date;
+    eventType: string | null;
     eventDate: Date | null;
     deliveryDate: Date | null;
     customer: { name: string; phone: string; email: string | null };
@@ -25,6 +29,7 @@ interface OrderDetailModalProps {
   } | null;
   isOpen: boolean;
   onClose: () => void;
+  onEdit?: (order: any) => void;
 }
 
 const ORDER_STATUSES = [
@@ -40,7 +45,7 @@ const ORDER_STATUSES = [
   "CANCELLED",
 ];
 
-export function OrderDetailModal({ order, isOpen, onClose }: OrderDetailModalProps) {
+export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetailModalProps) {
   const [loading, setLoading] = useState(false);
 
   if (!isOpen || !order) return null;
@@ -80,9 +85,23 @@ export function OrderDetailModal({ order, isOpen, onClose }: OrderDetailModalPro
               Customer: <span className="font-semibold text-[#20231f]">{order.customer.name}</span> ({order.customer.phone})
             </p>
           </div>
-          <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
-            <X className="size-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEdit(order);
+                }}
+                className="flex items-center gap-1 rounded-lg border border-[#d8ded2] px-3 py-1.5 text-xs font-semibold text-[#3f563f] hover:bg-[#edf1e8]"
+              >
+                <Edit className="size-3.5" /> Edit Order
+              </button>
+            )}
+            <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
+              <X className="size-5" />
+            </button>
+          </div>
         </div>
 
         {/* Status Lifecycle Stepper */}

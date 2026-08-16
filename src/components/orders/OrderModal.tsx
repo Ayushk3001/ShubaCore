@@ -1,23 +1,58 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Plus, Trash2, Loader2 } from "lucide-react";
-import { createOrderAction } from "@/lib/actions";
+import { createOrderAction, updateOrderAction } from "@/lib/actions";
 
 interface OrderModalProps {
+  order?: {
+    id: string;
+    orderNumber?: string;
+    customerId: string;
+    source: string;
+    assignedPartnerId: string | null;
+    eventType: string | null;
+    eventDate: Date | null;
+    deliveryDate: Date | null;
+    deliveryAddress: string | null;
+    discount: any;
+    notes: string | null;
+    items: Array<{ description: string; quantity: number; unitPrice: any; customizationDetails: string | null }>;
+  } | null;
   customers: Array<{ id: string; name: string; phone: string }>;
   partners: Array<{ id: string; name: string }>;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalProps) {
+export function OrderModal({ order, customers, partners, isOpen, onClose }: OrderModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [discount, setDiscount] = useState(0);
   const [items, setItems] = useState<Array<{ description: string; quantity: number; unitPrice: number; customizationDetails: string }>>([
     { description: "", quantity: 1, unitPrice: 0, customizationDetails: "" },
   ]);
+
+  const isEditing = Boolean(order);
+
+  useEffect(() => {
+    if (order) {
+      setDiscount(Number(order.discount) || 0);
+      if (order.items && order.items.length > 0) {
+        setItems(
+          order.items.map((i) => ({
+            description: i.description,
+            quantity: i.quantity,
+            unitPrice: Number(i.unitPrice),
+            customizationDetails: i.customizationDetails || "",
+          }))
+        );
+      }
+    } else {
+      setDiscount(0);
+      setItems([{ description: "", quantity: 1, unitPrice: 0, customizationDetails: "" }]);
+    }
+  }, [order, isOpen]);
 
   if (!isOpen) return null;
 
@@ -47,42 +82,58 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
 
     const formData = new FormData(e.currentTarget);
     const data = {
-      customerId: formData.get("customerId") as string,
+      customerId: (formData.get("customerId") as string) || undefined,
       source: formData.get("source") as "WHATSAPP" | "INSTAGRAM" | "OTHER",
-      assignedPartnerId: formData.get("assignedPartnerId") as string,
-      eventType: formData.get("eventType") as string,
-      eventDate: formData.get("eventDate") as string,
-      deliveryDate: formData.get("deliveryDate") as string,
-      deliveryAddress: formData.get("deliveryAddress") as string,
+      assignedPartnerId: (formData.get("assignedPartnerId") as string) || undefined,
+      eventType: (formData.get("eventType") as string) || undefined,
+      eventDate: (formData.get("eventDate") as string) || undefined,
+      deliveryDate: (formData.get("deliveryDate") as string) || undefined,
+      deliveryAddress: (formData.get("deliveryAddress") as string) || undefined,
       discount,
-      notes: formData.get("notes") as string,
+      notes: (formData.get("notes") as string) || undefined,
       items: items.map((item) => ({
         description: item.description,
         quantity: Number(item.quantity),
         unitPrice: Number(item.unitPrice),
-        customizationDetails: item.customizationDetails,
+        customizationDetails: item.customizationDetails || undefined,
       })),
     };
 
     try {
-      await createOrderAction(data);
+      const res = isEditing && order
+        ? await updateOrderAction(order.id, data)
+        : await createOrderAction(data);
+
+      if (!res.success) {
+        setError(res.error || "Failed to save order.");
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError("Failed to create order.");
+        setError("Failed to save order.");
       }
     } finally {
       setLoading(false);
     }
   }
 
+  const defaultEventDate = order?.eventDate
+    ? new Date(order.eventDate).toISOString().split("T")[0]
+    : "";
+  const defaultDeliveryDate = order?.deliveryDate
+    ? new Date(order.deliveryDate).toISOString().split("T")[0]
+    : "";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-2xl rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
-          <h2 className="text-lg font-bold text-[#20231f]">Create New Order</h2>
+          <h2 className="text-lg font-bold text-[#20231f]">
+            {isEditing ? `Edit Order ${order?.orderNumber || ""}` : "Create New Order"}
+          </h2>
           <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
             <X className="size-5" />
           </button>
@@ -101,6 +152,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               <select
                 name="customerId"
                 required
+                defaultValue={order?.customerId || ""}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               >
                 <option value="">Select customer...</option>
@@ -116,7 +168,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               <select
                 name="source"
                 required
-                defaultValue="WHATSAPP"
+                defaultValue={order?.source || "WHATSAPP"}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               >
                 <option value="WHATSAPP">WhatsApp</option>
@@ -133,6 +185,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               <label className="block text-xs font-semibold text-[#4e584f]">Assign Partner</label>
               <select
                 name="assignedPartnerId"
+                defaultValue={order?.assignedPartnerId || ""}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               >
                 <option value="">Unassigned</option>
@@ -148,6 +201,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               <input
                 type="date"
                 name="eventDate"
+                defaultValue={defaultEventDate}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
             </div>
@@ -156,6 +210,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               <input
                 type="date"
                 name="deliveryDate"
+                defaultValue={defaultDeliveryDate}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
             </div>
@@ -166,6 +221,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
             <textarea
               name="deliveryAddress"
               rows={2}
+              defaultValue={order?.deliveryAddress || ""}
               placeholder="Delivery destination address..."
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
             />
@@ -209,6 +265,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
                       type="number"
                       placeholder="Price (₹)"
                       step="0.01"
+                      min={0}
                       value={item.unitPrice}
                       onChange={(e) => handleItemChange(idx, "unitPrice", Number(e.target.value))}
                       required
@@ -258,6 +315,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
             <textarea
               name="notes"
               rows={2}
+              defaultValue={order?.notes || ""}
               placeholder="Internal order notes..."
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
             />
@@ -277,7 +335,7 @@ export function OrderModal({ customers, partners, isOpen, onClose }: OrderModalP
               className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}
-              Create Order
+              {isEditing ? "Save Changes" : "Create Order"}
             </button>
           </div>
         </form>

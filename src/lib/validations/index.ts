@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { moneySchema, requiredStringSchema } from "./shared";
+import {
+  moneySchema,
+  positiveMoneySchema,
+  requiredStringSchema,
+  optionalStringSchema,
+  optionalDateSchema,
+  optionalEmailSchema,
+} from "./shared";
 
 // Enums matching schema.prisma
 export const RoleEnum = z.enum(["PARTNER", "STAFF"]);
@@ -44,8 +51,8 @@ export const PartnerTransactionTypeEnum = z.enum([
 export const customerSchema = z.object({
   name: requiredStringSchema,
   phone: requiredStringSchema,
-  email: z.string().trim().email().optional().or(z.literal("")),
-  notes: z.string().optional(),
+  email: optionalEmailSchema,
+  notes: optionalStringSchema,
 });
 
 // Lead Validation
@@ -53,30 +60,39 @@ export const leadSchema = z.object({
   customerId: requiredStringSchema,
   source: LeadSourceEnum,
   stage: LeadStageEnum.default("NEW"),
-  eventType: z.string().optional(),
-  eventDate: z.string().optional(),
-  estimatedQuantity: z.coerce.number().int().positive().optional().or(z.literal(0)),
-  estimatedBudget: moneySchema.optional().or(z.literal(0)),
-  quoteAmount: moneySchema.optional().or(z.literal(0)),
-  assignedPartnerId: z.string().optional(),
-  requirements: z.string().optional(),
-  notes: z.string().optional(),
+  eventType: optionalStringSchema,
+  eventDate: optionalDateSchema,
+  estimatedQuantity: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) || Number(val) <= 0 ? undefined : Number(val)),
+    z.number().int().positive().optional()
+  ),
+  estimatedBudget: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) || Number(val) <= 0 ? undefined : Number(val)),
+    moneySchema.optional()
+  ),
+  quoteAmount: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) || Number(val) <= 0 ? undefined : Number(val)),
+    moneySchema.optional()
+  ),
+  assignedPartnerId: optionalStringSchema,
+  requirements: optionalStringSchema,
+  notes: optionalStringSchema,
 });
 
 // Lead Conversion to Order Validation
 export const leadConversionSchema = z.object({
   leadId: requiredStringSchema,
-  assignedPartnerId: z.string().optional(),
-  deliveryDate: z.string().optional(),
-  deliveryAddress: z.string().optional(),
-  notes: z.string().optional(),
+  assignedPartnerId: optionalStringSchema,
+  deliveryDate: optionalDateSchema,
+  deliveryAddress: optionalStringSchema,
+  notes: optionalStringSchema,
   items: z
     .array(
       z.object({
         description: requiredStringSchema,
-        quantity: z.coerce.number().int().positive(),
+        quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
         unitPrice: moneySchema,
-        customizationDetails: z.string().optional(),
+        customizationDetails: optionalStringSchema,
       })
     )
     .min(1, "At least one item is required for an order"),
@@ -85,23 +101,26 @@ export const leadConversionSchema = z.object({
 // Order Item Validation
 export const orderItemSchema = z.object({
   description: requiredStringSchema,
-  quantity: z.coerce.number().int().positive(),
+  quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
   unitPrice: moneySchema,
-  customizationDetails: z.string().optional(),
+  customizationDetails: optionalStringSchema,
 });
 
 // Order Validation
 export const orderSchema = z.object({
   customerId: requiredStringSchema,
   source: LeadSourceEnum,
-  assignedPartnerId: z.string().optional(),
-  eventType: z.string().optional(),
-  eventDate: z.string().optional(),
-  deliveryDate: z.string().optional(),
+  assignedPartnerId: optionalStringSchema,
+  eventType: optionalStringSchema,
+  eventDate: optionalDateSchema,
+  deliveryDate: optionalDateSchema,
   status: OrderStatusEnum.default("NEW"),
-  discount: moneySchema.default(0),
-  deliveryAddress: z.string().optional(),
-  notes: z.string().optional(),
+  discount: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) ? 0 : Number(val)),
+    moneySchema.default(0)
+  ),
+  deliveryAddress: optionalStringSchema,
+  notes: optionalStringSchema,
   items: z.array(orderItemSchema).min(1, "At least one item is required"),
 });
 
@@ -113,55 +132,55 @@ export const orderStatusUpdateSchema = z.object({
 // Payment Validation
 export const paymentSchema = z.object({
   orderId: requiredStringSchema,
-  amount: moneySchema,
+  amount: positiveMoneySchema,
   type: PaymentTypeEnum,
   method: PaymentMethodEnum,
-  reference: z.string().optional(),
-  paidAt: z.string().optional(),
-  notes: z.string().optional(),
+  reference: optionalStringSchema,
+  paidAt: optionalDateSchema,
+  notes: optionalStringSchema,
 });
 
 // Expense Validation
 export const expenseSchema = z.object({
   category: ExpenseCategoryEnum,
-  amount: moneySchema,
+  amount: positiveMoneySchema,
   description: requiredStringSchema,
-  orderId: z.string().optional(),
-  paidById: z.string().optional(),
+  orderId: optionalStringSchema,
+  paidById: optionalStringSchema,
   method: PaymentMethodEnum,
-  expenseDate: z.string().optional(),
+  expenseDate: optionalDateSchema,
 });
 
 // Partner Transaction Validation
 export const partnerTransactionSchema = z.object({
   partnerId: requiredStringSchema,
   type: PartnerTransactionTypeEnum,
-  amount: moneySchema,
+  amount: positiveMoneySchema,
   description: requiredStringSchema,
-  method: PaymentMethodEnum.optional(),
-  occurredAt: z.string().optional(),
+  method: z.preprocess((val) => (val === "" || val === null || val === undefined ? undefined : val), PaymentMethodEnum.optional()),
+  occurredAt: optionalDateSchema,
 });
 
 // Supplier Validation
 export const supplierSchema = z.object({
   name: requiredStringSchema,
-  contactPerson: z.string().optional(),
+  contactPerson: optionalStringSchema,
   phone: requiredStringSchema,
-  email: z.string().trim().email().optional().or(z.literal("")),
-  address: z.string().optional(),
-  notes: z.string().optional(),
+  email: optionalEmailSchema,
+  address: optionalStringSchema,
+  notes: optionalStringSchema,
 });
 
 // Product Validation
 export const productSchema = z.object({
   name: requiredStringSchema,
   sku: requiredStringSchema,
-  category: z.string().optional(),
+  category: optionalStringSchema,
   unit: z.string().default("pcs"),
   currentStock: z.coerce.number().int().nonnegative().default(0),
   minStock: z.coerce.number().int().nonnegative().default(10),
   purchaseCost: moneySchema,
-  supplierId: z.string().optional(),
+  supplierId: optionalStringSchema,
 });
 
 // Stock Movement Validation
@@ -169,6 +188,7 @@ export const stockMovementSchema = z.object({
   productId: requiredStringSchema,
   type: StockMovementTypeEnum,
   quantity: z.coerce.number().int(),
-  reference: z.string().optional(),
+  reference: optionalStringSchema,
 });
+
 

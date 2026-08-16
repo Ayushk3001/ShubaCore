@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Users, Wallet, ArrowUpRight, ArrowDownRight, Shield, UserPlus } from "lucide-react";
+import { Plus, Users, Wallet, ArrowUpRight, ArrowDownRight, Shield, UserPlus, Edit } from "lucide-react";
 import { PartnerTransactionModal } from "./PartnerTransactionModal";
 import { AddPartnerModal } from "./AddPartnerModal";
 
@@ -13,6 +13,7 @@ export function PartnersClient({
   transactions: Array<any>;
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [isAddPartnerOpen, setIsAddPartnerOpen] = useState(false);
 
   return (
@@ -33,7 +34,10 @@ export function PartnersClient({
             Add Partner
           </button>
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setEditingTransaction(null);
+              setIsModalOpen(true);
+            }}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#394a39] shadow-sm"
           >
             <Plus className="size-4" />
@@ -108,6 +112,7 @@ export function PartnersClient({
                   <th className="px-6 py-3.5">Description</th>
                   <th className="px-6 py-3.5">Date</th>
                   <th className="px-6 py-3.5 text-right">Amount</th>
+                  <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#edf1e8]">
@@ -137,6 +142,15 @@ export function PartnersClient({
                     >
                       ₹{Number(t.amount).toLocaleString()}
                     </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        title="Edit Transaction"
+                        onClick={() => setEditingTransaction(t)}
+                        className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                      >
+                        <Edit className="size-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -146,9 +160,13 @@ export function PartnersClient({
       </div>
 
       <PartnerTransactionModal
+        transaction={editingTransaction}
         partners={partners}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        isOpen={isModalOpen || Boolean(editingTransaction)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingTransaction(null);
+        }}
       />
 
       <AddPartnerModal

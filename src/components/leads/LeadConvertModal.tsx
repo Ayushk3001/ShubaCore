@@ -62,20 +62,24 @@ export function LeadConvertModal({ lead, partners, isOpen, onClose }: LeadConver
     const formData = new FormData(e.currentTarget);
     const data = {
       leadId: lead.id,
-      assignedPartnerId: formData.get("assignedPartnerId") as string,
-      deliveryDate: formData.get("deliveryDate") as string,
-      deliveryAddress: formData.get("deliveryAddress") as string,
-      notes: formData.get("notes") as string,
+      assignedPartnerId: (formData.get("assignedPartnerId") as string) || undefined,
+      deliveryDate: (formData.get("deliveryDate") as string) || undefined,
+      deliveryAddress: (formData.get("deliveryAddress") as string) || undefined,
+      notes: (formData.get("notes") as string) || undefined,
       items: items.map((item) => ({
         description: item.description,
         quantity: Number(item.quantity),
         unitPrice: Number(item.unitPrice),
-        customizationDetails: item.customizationDetails,
+        customizationDetails: item.customizationDetails || undefined,
       })),
     };
 
     try {
-      await convertLeadToOrderAction(data);
+      const res = await convertLeadToOrderAction(data);
+      if (!res.success) {
+        setError(res.error || "Failed to convert lead to order.");
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error) {

@@ -23,14 +23,18 @@ export function StockAdjustModal({ products, isOpen, onClose }: StockAdjustModal
 
     const formData = new FormData(e.currentTarget);
     const data = {
-      productId: formData.get("productId") as string,
+      productId: (formData.get("productId") as string) || "",
       type: formData.get("type") as any,
       quantity: Number(formData.get("quantity")),
-      reference: formData.get("reference") as string,
+      reference: (formData.get("reference") as string) || undefined,
     };
 
     try {
-      await recordStockMovementAction(data);
+      const res = await recordStockMovementAction(data);
+      if (!res.success) {
+        setError(res.error || "Failed to record stock movement.");
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error) {

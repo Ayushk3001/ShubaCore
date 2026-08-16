@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit } from "lucide-react";
 import { PaymentModal } from "./PaymentModal";
 import { ExpenseModal } from "./ExpenseModal";
 
@@ -19,6 +19,8 @@ export function FinanceClient({
   const [activeTab, setActiveTab] = useState<"PAYMENTS" | "EXPENSES" | "PROFITABILITY">("PAYMENTS");
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<any>(null);
+  const [editingExpense, setEditingExpense] = useState<any>(null);
 
   const totalIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -35,14 +37,20 @@ export function FinanceClient({
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setIsExpenseModalOpen(true)}
+            onClick={() => {
+              setEditingExpense(null);
+              setIsExpenseModalOpen(true);
+            }}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#d8ded2] bg-white px-4 py-2 text-sm font-medium text-[#20231f] transition hover:bg-[#edf1e8] shadow-sm"
           >
             <Receipt className="size-4" />
             Add Expense
           </button>
           <button
-            onClick={() => setIsPaymentModalOpen(true)}
+            onClick={() => {
+              setEditingPayment(null);
+              setIsPaymentModalOpen(true);
+            }}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#394a39] shadow-sm"
           >
             <CreditCard className="size-4" />
@@ -133,6 +141,7 @@ export function FinanceClient({
                     <th className="px-6 py-3.5">Reference</th>
                     <th className="px-6 py-3.5">Received Date</th>
                     <th className="px-6 py-3.5 text-right">Amount</th>
+                    <th className="px-6 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#edf1e8]">
@@ -159,6 +168,15 @@ export function FinanceClient({
                       <td className="px-6 py-4 text-right font-bold text-[#263326]">
                         ₹{Number(p.amount).toLocaleString()}
                       </td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          title="Edit Payment"
+                          onClick={() => setEditingPayment(p)}
+                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                        >
+                          <Edit className="size-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -182,6 +200,7 @@ export function FinanceClient({
                     <th className="px-6 py-3.5">Paid By</th>
                     <th className="px-6 py-3.5">Date</th>
                     <th className="px-6 py-3.5 text-right">Amount</th>
+                    <th className="px-6 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#edf1e8]">
@@ -204,6 +223,15 @@ export function FinanceClient({
                       </td>
                       <td className="px-6 py-4 text-right font-bold text-rose-700">
                         ₹{Number(e.amount).toLocaleString()}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          title="Edit Expense"
+                          onClick={() => setEditingExpense(e)}
+                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                        >
+                          <Edit className="size-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -261,16 +289,24 @@ export function FinanceClient({
       )}
 
       <PaymentModal
+        payment={editingPayment}
         orders={orders}
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
+        isOpen={isPaymentModalOpen || Boolean(editingPayment)}
+        onClose={() => {
+          setIsPaymentModalOpen(false);
+          setEditingPayment(null);
+        }}
       />
 
       <ExpenseModal
+        expense={editingExpense}
         orders={orders}
         partners={partners}
-        isOpen={isExpenseModalOpen}
-        onClose={() => setIsExpenseModalOpen(false)}
+        isOpen={isExpenseModalOpen || Boolean(editingExpense)}
+        onClose={() => {
+          setIsExpenseModalOpen(false);
+          setEditingExpense(null);
+        }}
       />
     </div>
   );

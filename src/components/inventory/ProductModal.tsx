@@ -36,21 +36,24 @@ export function ProductModal({ product, suppliers, isOpen, onClose }: ProductMod
 
     const formData = new FormData(e.currentTarget);
     const data = {
-      name: formData.get("name") as string,
-      sku: formData.get("sku") as string,
-      category: formData.get("category") as string,
-      unit: formData.get("unit") as string,
+      name: (formData.get("name") as string) || "",
+      sku: (formData.get("sku") as string) || "",
+      category: (formData.get("category") as string) || undefined,
+      unit: (formData.get("unit") as string) || "pcs",
       currentStock: Number(formData.get("currentStock")),
       minStock: Number(formData.get("minStock")),
       purchaseCost: Number(formData.get("purchaseCost")),
-      supplierId: formData.get("supplierId") as string,
+      supplierId: (formData.get("supplierId") as string) || undefined,
     };
 
     try {
-      if (isEditing && product) {
-        await updateProductAction(product.id, data);
-      } else {
-        await createProductAction(data);
+      const res = isEditing && product
+        ? await updateProductAction(product.id, data)
+        : await createProductAction(data);
+
+      if (!res.success) {
+        setError(res.error || "Failed to save product.");
+        return;
       }
       onClose();
     } catch (err: unknown) {

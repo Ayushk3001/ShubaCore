@@ -2,19 +2,31 @@
 
 import { useState } from "react";
 import { X, Loader2 } from "lucide-react";
-import { createPaymentAction } from "@/lib/actions";
+import { createPaymentAction, updatePaymentAction } from "@/lib/actions";
 
 interface PaymentModalProps {
+  payment?: {
+    id: string;
+    orderId: string;
+    amount: any;
+    type: any;
+    method: any;
+    reference: string | null;
+    paidAt: Date;
+    notes: string | null;
+  } | null;
   orders: Array<{ id: string; orderNumber: string; customer: { name: string }; total: any }>;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
+export function PaymentModal({ payment, orders, isOpen, onClose }: PaymentModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   if (!isOpen) return null;
+
+  const isEditing = Boolean(payment);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -23,17 +35,24 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
 
     const formData = new FormData(e.currentTarget);
     const data = {
-      orderId: formData.get("orderId") as string,
+      orderId: (formData.get("orderId") as string) || "",
       amount: Number(formData.get("amount")),
       type: formData.get("type") as "ADVANCE" | "PARTIAL" | "FINAL" | "REFUND",
       method: formData.get("method") as "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER",
-      reference: formData.get("reference") as string,
-      paidAt: formData.get("paidAt") as string,
-      notes: formData.get("notes") as string,
+      reference: (formData.get("reference") as string) || undefined,
+      paidAt: (formData.get("paidAt") as string) || undefined,
+      notes: (formData.get("notes") as string) || undefined,
     };
 
     try {
-      await createPaymentAction(data);
+      const res = isEditing && payment
+        ? await updatePaymentAction(payment.id, data)
+        : await createPaymentAction(data);
+
+      if (!res.success) {
+        setError(res.error || "Failed to record payment.");
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -46,11 +65,17 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
     }
   }
 
+  const defaultPaidAt = payment
+    ? new Date(payment.paidAt).toISOString().split("T")[0]
+    : new Date().toISOString().split("T")[0];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-md rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
-          <h2 className="text-lg font-bold text-[#20231f]">Record Order Payment</h2>
+          <h2 className="text-lg font-bold text-[#20231f]">
+            {isEditing ? "Edit Order Payment" : "Record Order Payment"}
+          </h2>
           <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
             <X className="size-5" />
           </button>
@@ -68,6 +93,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
             <select
               name="orderId"
               required
+              defaultValue={payment?.orderId || ""}
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
             >
               <option value="">Select order...</option>
@@ -86,8 +112,10 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
                 type="number"
                 name="amount"
                 step="0.01"
+                min={1}
                 required
-                placeholder="2000"
+                defaultValue={payment ? Number(payment.amount) : 1}
+                placeholder="1"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               />
             </div>
@@ -97,7 +125,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
               <select
                 name="type"
                 required
-                defaultValue="ADVANCE"
+                defaultValue={payment?.type || "ADVANCE"}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               >
                 <option value="ADVANCE">ADVANCE</option>
@@ -114,7 +142,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
               <select
                 name="method"
                 required
-                defaultValue="UPI"
+                defaultValue={payment?.method || "UPI"}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               >
                 <option value="UPI">UPI</option>
@@ -129,7 +157,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
               <input
                 type="date"
                 name="paidAt"
-                defaultValue={new Date().toISOString().split("T")[0]}
+                defaultValue={defaultPaidAt}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               />
             </div>
@@ -140,6 +168,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
             <input
               type="text"
               name="reference"
+              defaultValue={payment?.reference || ""}
               placeholder="e.g. UTR 429381920394"
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
             />
@@ -150,6 +179,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
             <textarea
               name="notes"
               rows={2}
+              defaultValue={payment?.notes || ""}
               placeholder="Payment remarks..."
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
             />
@@ -169,7 +199,7 @@ export function PaymentModal({ orders, isOpen, onClose }: PaymentModalProps) {
               className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}
-              Record Payment
+              {isEditing ? "Save Changes" : "Record Payment"}
             </button>
           </div>
         </form>

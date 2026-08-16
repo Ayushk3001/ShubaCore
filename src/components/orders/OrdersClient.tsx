@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Filter, ShoppingBag, Eye, Calendar, UserCheck } from "lucide-react";
+import { Plus, Search, Filter, ShoppingBag, Eye, Calendar, UserCheck, Edit } from "lucide-react";
 import { OrderModal } from "./OrderModal";
 import { OrderDetailModal } from "./OrderDetailModal";
 
 type OrderWithRelations = {
   id: string;
   orderNumber: string;
+  customerId: string;
   source: string;
+  assignedPartnerId: string | null;
   status: string;
   subtotal: any;
   discount: any;
@@ -16,6 +18,7 @@ type OrderWithRelations = {
   deliveryAddress: string | null;
   notes: string | null;
   createdAt: Date;
+  eventType: string | null;
   eventDate: Date | null;
   deliveryDate: Date | null;
   customer: { name: string; phone: string; email: string | null };
@@ -50,6 +53,7 @@ export function OrdersClient({
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<OrderWithRelations | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderWithRelations | null>(null);
 
   const filteredOrders = orders.filter((o) => {
@@ -71,7 +75,10 @@ export function OrdersClient({
           </p>
         </div>
         <button
-          onClick={() => setIsCreateModalOpen(true)}
+          onClick={() => {
+            setEditingOrder(null);
+            setIsCreateModalOpen(true);
+          }}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#394a39] shadow-sm"
         >
           <Plus className="size-4" />
@@ -136,7 +143,7 @@ export function OrdersClient({
                   <th className="px-6 py-3.5">Financial Summary</th>
                   <th className="px-6 py-3.5">Partner</th>
                   <th className="px-6 py-3.5">Status</th>
-                  <th className="px-6 py-3.5 text-right">Details</th>
+                  <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#edf1e8]">
@@ -144,7 +151,6 @@ export function OrdersClient({
                   const totalPaid = order.payments.reduce((s, p) => s + Number(p.amount), 0);
                   const totalExpenses = order.expenses.reduce((s, e) => s + Number(e.amount), 0);
                   const balance = Number(order.total) - totalPaid;
-                  const profit = Number(order.total) - totalExpenses;
 
                   return (
                     <tr key={order.id} className="hover:bg-[#fbfcf9] transition">
@@ -185,12 +191,22 @@ export function OrdersClient({
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
-                        >
-                          <Eye className="size-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            title="View Details"
+                            onClick={() => setSelectedOrder(order)}
+                            className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
+                          >
+                            <Eye className="size-4" />
+                          </button>
+                          <button
+                            title="Edit Order"
+                            onClick={() => setEditingOrder(order)}
+                            className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                          >
+                            <Edit className="size-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -202,16 +218,21 @@ export function OrdersClient({
       </div>
 
       <OrderModal
+        order={editingOrder}
         customers={customers}
         partners={partners}
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        isOpen={isCreateModalOpen || Boolean(editingOrder)}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setEditingOrder(null);
+        }}
       />
 
       <OrderDetailModal
         order={selectedOrder}
         isOpen={Boolean(selectedOrder)}
         onClose={() => setSelectedOrder(null)}
+        onEdit={(ord) => setEditingOrder(ord)}
       />
     </div>
   );

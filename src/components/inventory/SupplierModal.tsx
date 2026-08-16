@@ -33,19 +33,22 @@ export function SupplierModal({ supplier, isOpen, onClose }: SupplierModalProps)
 
     const formData = new FormData(e.currentTarget);
     const data = {
-      name: formData.get("name") as string,
-      contactPerson: formData.get("contactPerson") as string,
-      phone: formData.get("phone") as string,
-      email: formData.get("email") as string,
-      address: formData.get("address") as string,
-      notes: formData.get("notes") as string,
+      name: (formData.get("name") as string) || "",
+      contactPerson: (formData.get("contactPerson") as string) || undefined,
+      phone: (formData.get("phone") as string) || "",
+      email: (formData.get("email") as string) || undefined,
+      address: (formData.get("address") as string) || undefined,
+      notes: (formData.get("notes") as string) || undefined,
     };
 
     try {
-      if (isEditing && supplier) {
-        await updateSupplierAction(supplier.id, data);
-      } else {
-        await createSupplierAction(data);
+      const res = isEditing && supplier
+        ? await updateSupplierAction(supplier.id, data)
+        : await createSupplierAction(data);
+
+      if (!res.success) {
+        setError(res.error || "Failed to save supplier.");
+        return;
       }
       onClose();
     } catch (err: unknown) {

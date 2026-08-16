@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { InventoryClient } from "@/components/inventory/InventoryClient";
+import { serializeData } from "@/lib/serialize";
 
 export default async function InventoryPage() {
   await requireUser();
@@ -30,9 +31,9 @@ export default async function InventoryPage() {
 
   return (
     <InventoryClient
-      products={products as any}
-      suppliers={suppliers}
-      stockMovements={stockMovements as any}
+      products={serializeData(products) as any}
+      suppliers={serializeData(suppliers)}
+      stockMovements={serializeData(stockMovements) as any}
     />
   );
 }

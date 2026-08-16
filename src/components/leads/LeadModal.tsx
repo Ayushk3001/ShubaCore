@@ -2,20 +2,36 @@
 
 import { useState } from "react";
 import { X, Loader2 } from "lucide-react";
-import { createLeadAction } from "@/lib/actions";
+import { createLeadAction, updateLeadAction } from "@/lib/actions";
 
 interface LeadModalProps {
+  lead?: {
+    id: string;
+    customerId: string;
+    source: string;
+    stage: string;
+    eventType: string | null;
+    eventDate: Date | null;
+    estimatedQuantity: number | null;
+    estimatedBudget: any;
+    quoteAmount: any;
+    assignedPartnerId: string | null;
+    requirements: string | null;
+    notes: string | null;
+  } | null;
   customers: Array<{ id: string; name: string; phone: string }>;
   partners: Array<{ id: string; name: string }>;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalProps) {
+export function LeadModal({ lead, customers, partners, isOpen, onClose }: LeadModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   if (!isOpen) return null;
+
+  const isEditing = Boolean(lead);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -24,21 +40,28 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
 
     const formData = new FormData(e.currentTarget);
     const data = {
-      customerId: formData.get("customerId") as string,
+      customerId: (formData.get("customerId") as string) || undefined,
       source: formData.get("source") as "WHATSAPP" | "INSTAGRAM" | "OTHER",
       stage: formData.get("stage") as "NEW" | "CONTACTED" | "QUOTED" | "NEGOTIATION" | "WON" | "LOST",
-      eventType: formData.get("eventType") as string,
-      eventDate: formData.get("eventDate") as string,
+      eventType: (formData.get("eventType") as string) || undefined,
+      eventDate: (formData.get("eventDate") as string) || undefined,
       estimatedQuantity: Number(formData.get("estimatedQuantity")) || undefined,
       estimatedBudget: Number(formData.get("estimatedBudget")) || undefined,
       quoteAmount: Number(formData.get("quoteAmount")) || undefined,
-      assignedPartnerId: formData.get("assignedPartnerId") as string,
-      requirements: formData.get("requirements") as string,
-      notes: formData.get("notes") as string,
+      assignedPartnerId: (formData.get("assignedPartnerId") as string) || undefined,
+      requirements: (formData.get("requirements") as string) || undefined,
+      notes: (formData.get("notes") as string) || undefined,
     };
 
     try {
-      await createLeadAction(data);
+      const res = isEditing && lead
+        ? await updateLeadAction(lead.id, data)
+        : await createLeadAction(data);
+
+      if (!res.success) {
+        setError(res.error || "Failed to save lead.");
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -51,11 +74,17 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
     }
   }
 
+  const defaultEventDate = lead?.eventDate
+    ? new Date(lead.eventDate).toISOString().split("T")[0]
+    : "";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
-          <h2 className="text-lg font-semibold text-[#20231f]">Add New Lead Enquiry</h2>
+          <h2 className="text-lg font-semibold text-[#20231f]">
+            {isEditing ? "Edit Lead Enquiry" : "Add New Lead Enquiry"}
+          </h2>
           <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
             <X className="size-5" />
           </button>
@@ -73,6 +102,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
             <select
               name="customerId"
               required
+              defaultValue={lead?.customerId || ""}
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
             >
               <option value="">Select a customer...</option>
@@ -90,7 +120,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <select
                 name="source"
                 required
-                defaultValue="WHATSAPP"
+                defaultValue={lead?.source || "WHATSAPP"}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               >
                 <option value="WHATSAPP">WhatsApp</option>
@@ -106,7 +136,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <select
                 name="stage"
                 required
-                defaultValue="NEW"
+                defaultValue={lead?.stage || "NEW"}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               >
                 <option value="NEW">NEW</option>
@@ -125,6 +155,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <input
                 type="text"
                 name="eventType"
+                defaultValue={lead?.eventType || ""}
                 placeholder="e.g. Wedding, Birthday"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
@@ -134,6 +165,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <input
                 type="date"
                 name="eventDate"
+                defaultValue={defaultEventDate}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
             </div>
@@ -145,6 +177,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <input
                 type="number"
                 name="estimatedQuantity"
+                defaultValue={lead?.estimatedQuantity ?? ""}
                 placeholder="100"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
@@ -154,6 +187,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <input
                 type="number"
                 name="estimatedBudget"
+                defaultValue={lead?.estimatedBudget ? Number(lead.estimatedBudget) : ""}
                 placeholder="5000"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
@@ -163,6 +197,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               <input
                 type="number"
                 name="quoteAmount"
+                defaultValue={lead?.quoteAmount ? Number(lead.quoteAmount) : ""}
                 placeholder="4500"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
               />
@@ -173,6 +208,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
             <label className="block text-xs font-semibold text-[#4e584f]">Assign Partner</label>
             <select
               name="assignedPartnerId"
+              defaultValue={lead?.assignedPartnerId || ""}
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
             >
               <option value="">Unassigned</option>
@@ -189,6 +225,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
             <textarea
               name="requirements"
               rows={2}
+              defaultValue={lead?.requirements || ""}
               placeholder="e.g. Eco-friendly jute bags with custom gold foil printing"
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
             />
@@ -199,6 +236,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
             <textarea
               name="notes"
               rows={2}
+              defaultValue={lead?.notes || ""}
               placeholder="Customer prefers WhatsApp communication..."
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none focus:ring-1 focus:ring-[#3f563f]"
             />
@@ -218,7 +256,7 @@ export function LeadModal({ customers, partners, isOpen, onClose }: LeadModalPro
               className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}
-              Create Lead
+              {isEditing ? "Save Changes" : "Create Lead"}
             </button>
           </div>
         </form>

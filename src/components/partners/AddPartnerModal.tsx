@@ -27,7 +27,11 @@ export function AddPartnerModal({ isOpen, onClose }: AddPartnerModalProps) {
     };
 
     try {
-      await createPartnerUserAction(data);
+      const res = await createPartnerUserAction(data);
+      if (!res.success) {
+        setError(res.error || "Failed to add partner.");
+        return;
+      }
       onClose();
     } catch (err: unknown) {
       if (err instanceof Error) {

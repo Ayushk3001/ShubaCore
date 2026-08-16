@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Filter, ArrowRight, UserCheck, Phone, Calendar, Tag } from "lucide-react";
+import { Plus, Search, Filter, ArrowRight, UserCheck, Phone, Calendar, Tag, Edit } from "lucide-react";
 import { LeadModal } from "./LeadModal";
 import { LeadConvertModal } from "./LeadConvertModal";
 import { updateLeadStatusAction } from "@/lib/actions";
@@ -9,6 +9,7 @@ import { updateLeadStatusAction } from "@/lib/actions";
 type LeadWithRelations = {
   id: string;
   leadNumber: string;
+  customerId: string;
   source: "WHATSAPP" | "INSTAGRAM" | "OTHER";
   stage: "NEW" | "CONTACTED" | "QUOTED" | "NEGOTIATION" | "WON" | "LOST";
   eventType: string | null;
@@ -39,6 +40,7 @@ export function LeadsClient({
   const [selectedStage, setSelectedStage] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
+  const [editingLead, setEditingLead] = useState<LeadWithRelations | null>(null);
   const [leadToConvert, setLeadToConvert] = useState<LeadWithRelations | null>(null);
 
   const filteredLeads = leads.filter((l) => {
@@ -65,7 +67,10 @@ export function LeadsClient({
           </p>
         </div>
         <button
-          onClick={() => setIsLeadModalOpen(true)}
+          onClick={() => {
+            setEditingLead(null);
+            setIsLeadModalOpen(true);
+          }}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#394a39] shadow-sm"
         >
           <Plus className="size-4" />
@@ -205,19 +210,28 @@ export function LeadsClient({
                       </select>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      {lead.convertedOrder ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-900">
-                          Order: {lead.convertedOrder.orderNumber}
-                        </span>
-                      ) : (
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
-                          onClick={() => setLeadToConvert(lead)}
-                          className="inline-flex items-center gap-1.5 rounded-md bg-[#263326] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#394a39] shadow-sm"
+                          title="Edit Lead"
+                          onClick={() => setEditingLead(lead)}
+                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
                         >
-                          Convert to Order
-                          <ArrowRight className="size-3" />
+                          <Edit className="size-4" />
                         </button>
-                      )}
+                        {lead.convertedOrder ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-900">
+                            Order: {lead.convertedOrder.orderNumber}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setLeadToConvert(lead)}
+                            className="inline-flex items-center gap-1.5 rounded-md bg-[#263326] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#394a39] shadow-sm"
+                          >
+                            Convert
+                            <ArrowRight className="size-3" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -228,10 +242,14 @@ export function LeadsClient({
       </div>
 
       <LeadModal
+        lead={editingLead}
         customers={customers}
         partners={partners}
-        isOpen={isLeadModalOpen}
-        onClose={() => setIsLeadModalOpen(false)}
+        isOpen={isLeadModalOpen || Boolean(editingLead)}
+        onClose={() => {
+          setIsLeadModalOpen(false);
+          setEditingLead(null);
+        }}
       />
 
       <LeadConvertModal

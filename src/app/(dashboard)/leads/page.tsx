@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { LeadsClient } from "@/components/leads/LeadsClient";
+import { serializeData } from "@/lib/serialize";
 
 export default async function LeadsPage() {
   await requireUser();
@@ -24,5 +25,11 @@ export default async function LeadsPage() {
     }),
   ]);
 
-  return <LeadsClient leads={leads as any} customers={customers} partners={partners} />;
+  return (
+    <LeadsClient
+      leads={serializeData(leads) as any}
+      customers={serializeData(customers)}
+      partners={serializeData(partners)}
+    />
+  );
 }

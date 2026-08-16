@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { OrdersClient } from "@/components/orders/OrdersClient";
+import { serializeData } from "@/lib/serialize";
 
 export default async function OrdersPage() {
   await requireUser();
@@ -26,5 +27,11 @@ export default async function OrdersPage() {
     }),
   ]);
 
-  return <OrdersClient orders={orders as any} customers={customers} partners={partners} />;
+  return (
+    <OrdersClient
+      orders={serializeData(orders) as any}
+      customers={serializeData(customers)}
+      partners={serializeData(partners)}
+    />
+  );
 }
