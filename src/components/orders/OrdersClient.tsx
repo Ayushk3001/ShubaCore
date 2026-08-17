@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Filter, ShoppingBag, Eye, Calendar, UserCheck, Edit, Loader2 } from "lucide-react";
+import { Plus, Search, Filter, ShoppingBag, Eye, Calendar, UserCheck, Edit, Loader2, Trash2 } from "lucide-react";
 import { OrderModal } from "./OrderModal";
 import { OrderDetailModal } from "./OrderDetailModal";
-import { updateOrderStatusAction } from "@/lib/actions";
+import { updateOrderStatusAction, deleteOrderAction } from "@/lib/actions";
 
 type OrderWithRelations = {
   id: string;
@@ -71,6 +71,7 @@ export function OrdersClient({
   const [editingOrder, setEditingOrder] = useState<OrderWithRelations | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderWithRelations | null>(null);
   const [statusLoadingId, setStatusLoadingId] = useState<string | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string>("");
 
   async function handleStatusChange(orderId: string, newStatus: string) {
@@ -85,6 +86,24 @@ export function OrdersClient({
       setStatusError(err.message || "Failed to update order status.");
     } finally {
       setStatusLoadingId(null);
+    }
+  }
+
+  async function handleDeleteOrder(orderId: string, orderNumber: string) {
+    if (!confirm(`Are you sure you want to permanently delete Order ${orderNumber}? If stock was deducted, it will be automatically returned to inventory.`)) {
+      return;
+    }
+    setDeleteLoadingId(orderId);
+    setStatusError("");
+    try {
+      const res = await deleteOrderAction(orderId);
+      if (!res.success) {
+        setStatusError(res.error || "Failed to delete order.");
+      }
+    } catch (err: any) {
+      setStatusError(err.message || "Failed to delete order.");
+    } finally {
+      setDeleteLoadingId(null);
     }
   }
 
@@ -261,6 +280,18 @@ export function OrdersClient({
                             className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
                           >
                             <Edit className="size-4" />
+                          </button>
+                          <button
+                            title="Delete Order"
+                            disabled={deleteLoadingId === order.id}
+                            onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
+                            className="inline-flex items-center gap-1 rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:opacity-50 transition"
+                          >
+                            {deleteLoadingId === order.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-4" />
+                            )}
                           </button>
                         </div>
                       </td>

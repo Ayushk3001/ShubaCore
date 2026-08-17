@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { calculateProfitMetrics } from "@/lib/profit";
-import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag, Coins } from "lucide-react";
+import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag, Coins, Package, ShieldCheck } from "lucide-react";
 
 export default async function ReportsPage() {
   await requireUser();
 
-  const [orders, expenses, partnerTransactions, partners, leads] = await Promise.all([
+  const [orders, expenses, partnerTransactions, partners, leads, products] = await Promise.all([
     prisma.order.findMany({
       include: { assignedPartner: true, payments: true, expenses: true, items: true },
     }),
@@ -14,17 +14,28 @@ export default async function ReportsPage() {
     prisma.partnerTransaction.findMany(),
     prisma.user.findMany({ where: { role: "PARTNER" } }),
     prisma.lead.findMany(),
+    prisma.product.findMany({
+      where: { isActive: true },
+      select: { id: true, currentStock: true, purchaseCost: true },
+    }),
   ]);
 
   const {
     totalRevenue,
     totalCogs,
     grossProfit,
-    totalOperatingExpenses,
+    operatingExpenses,
+    inventoryStockPurchases,
+    capitalInvestments,
+    totalAllExpenses,
     partnerPayouts,
     netProfit,
     marginPercent,
-  } = calculateProfitMetrics({ orders, expenses, partnerTransactions });
+    inventoryAssetValuation,
+    totalCapitalInvested,
+    unrecoveredCapitalBalance,
+    capitalRecoveredPercent,
+  } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
 
   // Revenue by Partner
   const revenueByPartner = partners.map((p) => {
@@ -62,11 +73,11 @@ export default async function ReportsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Analytics & Business Reports</h1>
         <p className="mt-1 text-sm text-[#6b746c]">
-          Real-time metrics, profitability analysis, and sales channels breakdown.
+          Real-time profitability, inventory asset valuation, OpEx vs CapEx separation, and sales channels breakdown.
         </p>
       </div>
 
-      {/* Top Level P&L */}
+      {/* Top Level P&L Grid */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-[#6b746c]">Gross Order Revenue</p>
@@ -81,16 +92,42 @@ export default async function ReportsPage() {
           <p className="mt-2 text-xl sm:text-2xl font-bold text-emerald-900">₹{grossProfit.toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase text-rose-800">Total Operating Expenses</p>
-          <p className="mt-2 text-xl sm:text-2xl font-bold text-rose-900">₹{totalOperatingExpenses.toLocaleString()}</p>
+          <p className="text-xs font-semibold uppercase text-amber-800">Warehouse Stock Assets</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase text-blue-800">Net Business Profit</p>
-          <p className="mt-2 text-xl sm:text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()}</p>
+          <p className="text-xs font-semibold uppercase text-rose-800">Operating Overhead (OpEx)</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-rose-900">₹{operatingExpenses.toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase text-emerald-800">Overall Profit Margin</p>
-          <p className="mt-2 text-xl sm:text-2xl font-bold text-emerald-900">{marginPercent}%</p>
+          <p className="text-xs font-semibold uppercase text-blue-800">Net Profit (Margin %)</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()} ({marginPercent}%)</p>
+        </div>
+      </div>
+
+      {/* Capital Recovery & Asset Breakdown */}
+      <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4">
+        <div className="flex items-center gap-2 border-b border-[#edf1e8] pb-3">
+          <ShieldCheck className="size-4 text-[#3f563f]" />
+          <h2 className="text-sm font-bold text-[#20231f]">Capital Investment & Stock Asset Recovery</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+          <div className="rounded-lg border border-[#edf1e8] bg-[#f8faf6] p-3">
+            <span className="font-semibold text-[#6b746c]">Capital Stock Investments</span>
+            <p className="mt-1 text-lg font-bold text-[#20231f]">₹{totalCapitalInvested.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+            <span className="font-semibold text-emerald-900">Cash Recovered (Inflows)</span>
+            <p className="mt-1 text-lg font-bold text-emerald-950">₹{totalRevenue.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+            <span className="font-semibold text-amber-900">On-Hand Warehouse Stock</span>
+            <p className="mt-1 text-lg font-bold text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+            <span className="font-semibold text-blue-900">Capital Recovery Progress</span>
+            <p className="mt-1 text-lg font-bold text-blue-950">{capitalRecoveredPercent}%</p>
+          </div>
         </div>
       </div>
 

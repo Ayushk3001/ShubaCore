@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Loader2, PackageCheck } from "lucide-react";
+import { X, Plus, Trash2, Loader2, PackageCheck, Percent, TrendingUp, DollarSign } from "lucide-react";
 import { createOrderAction, updateOrderAction } from "@/lib/actions";
-import { calculateBundlePrice, calculateBundleVirtualStock } from "@/lib/bundles";
+import { calculateBundlePrice, calculateBundleCost } from "@/lib/bundles";
 
 interface OrderModalProps {
   order?: {
@@ -25,6 +25,8 @@ interface OrderModalProps {
       description: string;
       quantity: number;
       unitPrice: any;
+      costPriceSnapshot?: any;
+      marginRate?: number | null;
       customizationDetails: string | null;
     }>;
   } | null;
@@ -48,17 +50,21 @@ export function OrderModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [discount, setDiscount] = useState(0);
+  const [globalMargin, setGlobalMargin] = useState<number | "">("");
+
   const [items, setItems] = useState<
     Array<{
       productId?: string;
       bundleId?: string;
       description: string;
       quantity: number;
-      unitPrice: number;
+      costPrice: number; // Inventory unit cost
+      unitPrice: number; // Selling price charged to customer
+      marginRate: number; // Markup / Margin %
       customizationDetails: string;
     }>
   >([
-    { description: "", quantity: 1, unitPrice: 0, customizationDetails: "" },
+    { description: "", quantity: 1, costPrice: 0, unitPrice: 0, marginRate: 0, customizationDetails: "" },
   ]);
 
   const isEditing = Boolean(order);
@@ -68,26 +74,40 @@ export function OrderModal({
       setDiscount(Number(order.discount) || 0);
       if (order.items && order.items.length > 0) {
         setItems(
-          order.items.map((i) => ({
-            productId: i.productId || undefined,
-            bundleId: i.bundleId || undefined,
-            description: i.description,
-            quantity: i.quantity,
-            unitPrice: Number(i.unitPrice),
-            customizationDetails: i.customizationDetails || "",
-          }))
+          order.items.map((i) => {
+            const cost = Number(i.costPriceSnapshot) || 0;
+            const price = Number(i.unitPrice) || 0;
+            const margin = i.marginRate !== undefined && i.marginRate !== null
+              ? Number(i.marginRate)
+              : cost > 0 ? ((price - cost) / cost) * 100 : 0;
+
+            return {
+              productId: i.productId || undefined,
+              bundleId: i.bundleId || undefined,
+              description: i.description,
+              quantity: i.quantity,
+              costPrice: cost,
+              unitPrice: price,
+              marginRate: Number(margin.toFixed(1)),
+              customizationDetails: i.customizationDetails || "",
+            };
+          })
         );
       }
     } else {
       setDiscount(0);
-      setItems([{ description: "", quantity: 1, unitPrice: 0, customizationDetails: "" }]);
+      setGlobalMargin("");
+      setItems([{ description: "", quantity: 1, costPrice: 0, unitPrice: 0, marginRate: 0, customizationDetails: "" }]);
     }
   }, [order, isOpen]);
 
   if (!isOpen) return null;
 
   function handleAddItem() {
-    setItems([...items, { description: "", quantity: 1, unitPrice: 0, customizationDetails: "" }]);
+    setItems([
+      ...items,
+      { description: "", quantity: 1, costPrice: 0, unitPrice: 0, marginRate: 0, customizationDetails: "" },
+    ]);
   }
 
   function handleRemoveItem(index: number) {
@@ -96,9 +116,49 @@ export function OrderModal({
     }
   }
 
+  // Reactive price & margin calculation handlers
   function handleItemChange(index: number, field: string, value: any) {
     const updated = [...items];
-    updated[index] = { ...updated[index], [field]: value };
+    const current = { ...updated[index], [field]: value };
+
+    if (field === "costPrice") {
+      const cost = Number(value) || 0;
+      const margin = current.marginRate || 0;
+      const newUnitPrice = margin > 0 ? cost * (1 + margin / 100) : current.unitPrice;
+      current.costPrice = cost;
+      current.unitPrice = Number(newUnitPrice.toFixed(2));
+      current.marginRate = cost > 0 ? Number((((current.unitPrice - cost) / cost) * 100).toFixed(1)) : 0;
+    } else if (field === "marginRate") {
+      const margin = Number(value) || 0;
+      const cost = current.costPrice || 0;
+      const newUnitPrice = cost * (1 + margin / 100);
+      current.marginRate = margin;
+      current.unitPrice = Number(newUnitPrice.toFixed(2));
+    } else if (field === "unitPrice") {
+      const price = Number(value) || 0;
+      const cost = current.costPrice || 0;
+      current.unitPrice = price;
+      current.marginRate = cost > 0 ? Number((((price - cost) / cost) * 100).toFixed(1)) : 0;
+    }
+
+    updated[index] = current;
+    setItems(updated);
+  }
+
+  function handleApplyGlobalMargin(newMarginVal: number | "") {
+    setGlobalMargin(newMarginVal);
+    if (newMarginVal === "" || isNaN(Number(newMarginVal))) return;
+
+    const margin = Number(newMarginVal);
+    const updated = items.map((item) => {
+      const cost = item.costPrice || 0;
+      const newPrice = cost > 0 ? cost * (1 + margin / 100) : item.unitPrice;
+      return {
+        ...item,
+        marginRate: margin,
+        unitPrice: Number(newPrice.toFixed(2)),
+      };
+    });
     setItems(updated);
   }
 
@@ -109,38 +169,53 @@ export function OrderModal({
         ...updated[index],
         productId: undefined,
         bundleId: undefined,
+        costPrice: 0,
+        marginRate: 0,
       };
     } else if (selectionValue.startsWith("product:")) {
       const pId = selectionValue.replace("product:", "");
       const prod = products.find((p) => p.id === pId);
       if (prod) {
+        const cost = Number(prod.purchaseCost) || 0;
         updated[index] = {
           ...updated[index],
           productId: prod.id,
           bundleId: undefined,
           description: `[SKU: ${prod.sku}] ${prod.name}`,
-          unitPrice: Number(prod.purchaseCost) || 0,
+          costPrice: cost,
+          unitPrice: cost, // default 0% margin (at-cost)
+          marginRate: 0,
         };
       }
     } else if (selectionValue.startsWith("bundle:")) {
       const bId = selectionValue.replace("bundle:", "");
       const bndl = bundles.find((b) => b.id === bId);
       if (bndl) {
+        const cost = calculateBundleCost(bndl.bundleItems || []);
         const bPrice = calculateBundlePrice(bndl.pricingType, bndl.bundlePrice, bndl.bundleItems || []);
+        const defaultPrice = bPrice > 0 ? bPrice : cost;
+        const margin = cost > 0 ? ((defaultPrice - cost) / cost) * 100 : 0;
+
         updated[index] = {
           ...updated[index],
           productId: undefined,
           bundleId: bndl.id,
           description: `[Combo: ${bndl.sku}] ${bndl.name}`,
-          unitPrice: bPrice,
+          costPrice: cost,
+          unitPrice: Number(defaultPrice.toFixed(2)),
+          marginRate: Number(margin.toFixed(1)),
         };
       }
     }
     setItems(updated);
   }
 
+  // Financial Breakdown Calculations
+  const totalCogs = items.reduce((sum, item) => sum + item.quantity * (item.costPrice || 0), 0);
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const total = Math.max(0, subtotal - discount);
+  const projectedGrossProfit = total - totalCogs;
+  const overallGrossMarginPercent = total > 0 ? ((projectedGrossProfit / total) * 100).toFixed(1) : "0";
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -164,7 +239,9 @@ export function OrderModal({
         bundleId: item.bundleId,
         description: item.description,
         quantity: Number(item.quantity),
+        costPrice: Number(item.costPrice || 0),
         unitPrice: Number(item.unitPrice),
+        marginRate: Number(item.marginRate || 0),
         customizationDetails: item.customizationDetails || undefined,
       })),
     };
@@ -199,11 +276,16 @@ export function OrderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div className="w-full max-w-3xl rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
-          <h2 className="text-lg font-bold text-[#20231f]">
-            {isEditing ? `Edit Order ${order?.orderNumber || ""}` : "Create New Order"}
-          </h2>
+          <div>
+            <h2 className="text-lg font-bold text-[#20231f]">
+              {isEditing ? `Edit Order ${order?.orderNumber || ""}` : "Create New Order"}
+            </h2>
+            <p className="text-xs text-[#6b746c]">
+              Automatic cost price retrieval, reactive margin controls, and persistent financial snapshotting.
+            </p>
+          </div>
           <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
             <X className="size-5" />
           </button>
@@ -316,6 +398,28 @@ export function OrderModal({
             />
           </div>
 
+          {/* Global Margin Rate Controls */}
+          <div className="flex items-center justify-between rounded-lg border border-[#d8ded2] bg-[#f8faf6] p-3">
+            <div className="flex items-center gap-2">
+              <Percent className="size-4 text-[#3f563f]" />
+              <div>
+                <span className="text-xs font-bold text-[#20231f]">Global Uniform Margin Rate (%)</span>
+                <p className="text-[11px] text-[#6b746c]">Apply a uniform markup percentage to all line items</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                placeholder="e.g. 25"
+                step="0.1"
+                value={globalMargin}
+                onChange={(e) => handleApplyGlobalMargin(e.target.value === "" ? "" : Number(e.target.value))}
+                className="w-24 rounded-md border border-[#d8ded2] bg-white px-2.5 py-1 text-xs font-semibold text-[#20231f] focus:border-[#3f563f] focus:outline-none"
+              />
+              <span className="text-xs font-semibold text-[#4e584f]">%</span>
+            </div>
+          </div>
+
           {/* Line Items */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -345,14 +449,14 @@ export function OrderModal({
                         <select
                           value={currentSelection}
                           onChange={(e) => handleSelectCatalogItem(idx, e.target.value)}
-                          className="mt-0.5 w-full rounded-md border border-[#d8ded2] bg-white px-2.5 py-1.5 text-xs focus:border-[#3f563f] focus:outline-none"
+                          className="mt-0.5 w-full rounded-md border border-[#d8ded2] bg-white px-2.5 py-1.5 text-xs focus:border-[#3f563f] focus:outline-none font-medium text-[#20231f]"
                         >
                           <option value="">Custom Item (Manual Entry)</option>
                           {bundles.length > 0 && (
                             <optgroup label="Product Combos / Bundles">
                               {bundles.map((b) => (
                                 <option key={b.id} value={`bundle:${b.id}`}>
-                                  📦 [Combo] {b.name} ({b.sku})
+                                  📦 [Combo] {b.name} ({b.sku}) - Cost: ₹{calculateBundleCost(b.bundleItems || [])}
                                 </option>
                               ))}
                             </optgroup>
@@ -361,7 +465,7 @@ export function OrderModal({
                             <optgroup label="Standalone Products">
                               {products.map((p) => (
                                 <option key={p.id} value={`product:${p.id}`}>
-                                  🏷️ {p.name} ({p.sku}) - Stock: {p.currentStock}
+                                  🏷️ {p.name} ({p.sku}) - Cost: ₹{Number(p.purchaseCost || 0)} | Stock: {p.currentStock}
                                 </option>
                               ))}
                             </optgroup>
@@ -382,8 +486,8 @@ export function OrderModal({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
+                    <div className="grid grid-cols-5 gap-2 items-center">
+                      <div>
                         <label className="block text-[10px] font-semibold text-[#6b746c]">Quantity</label>
                         <input
                           type="number"
@@ -392,37 +496,66 @@ export function OrderModal({
                           value={item.quantity}
                           onChange={(e) => handleItemChange(idx, "quantity", Number(e.target.value))}
                           required
-                          className="mt-0.5 w-full rounded-md border border-[#d8ded2] bg-white px-2.5 py-1.5 text-xs focus:border-[#3f563f] focus:outline-none"
+                          className="mt-0.5 w-full rounded-md border border-[#d8ded2] bg-white px-2 py-1.5 text-xs focus:border-[#3f563f] focus:outline-none"
                         />
                       </div>
-                      <div className="flex-1">
-                        <label className="block text-[10px] font-semibold text-[#6b746c]">Unit Price (₹)</label>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-amber-900">Inventory Cost (₹)</label>
                         <input
                           type="number"
-                          placeholder="Price (₹)"
+                          placeholder="Cost (₹)"
+                          step="0.01"
+                          min={0}
+                          value={item.costPrice}
+                          onChange={(e) => handleItemChange(idx, "costPrice", Number(e.target.value))}
+                          className="mt-0.5 w-full rounded-md border border-amber-200 bg-amber-50/40 px-2 py-1.5 text-xs font-semibold text-amber-900 focus:border-[#3f563f] focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-emerald-900">Margin (%)</label>
+                        <input
+                          type="number"
+                          placeholder="Margin %"
+                          step="0.1"
+                          value={item.marginRate}
+                          onChange={(e) => handleItemChange(idx, "marginRate", Number(e.target.value))}
+                          className="mt-0.5 w-full rounded-md border border-emerald-200 bg-emerald-50/40 px-2 py-1.5 text-xs font-bold text-emerald-950 focus:border-[#3f563f] focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#20231f]">Selling Price (₹)</label>
+                        <input
+                          type="number"
+                          placeholder="Selling Price (₹)"
                           step="0.01"
                           min={0}
                           value={item.unitPrice}
                           onChange={(e) => handleItemChange(idx, "unitPrice", Number(e.target.value))}
                           required
-                          className="mt-0.5 w-full rounded-md border border-[#d8ded2] bg-white px-2.5 py-1.5 text-xs focus:border-[#3f563f] focus:outline-none"
+                          className="mt-0.5 w-full rounded-md border border-[#d8ded2] bg-white px-2 py-1.5 text-xs font-bold text-[#20231f] focus:border-[#3f563f] focus:outline-none"
                         />
                       </div>
-                      <div className="flex-1">
-                        <label className="block text-[10px] font-semibold text-[#6b746c]">Line Total</label>
-                        <p className="mt-2 text-xs font-bold text-[#20231f]">
-                          ₹{(item.quantity * item.unitPrice).toLocaleString()}
-                        </p>
+
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-[#6b746c]">Line Total</label>
+                          <p className="mt-1 text-xs font-bold text-[#263326]">
+                            ₹{(item.quantity * item.unitPrice).toLocaleString()}
+                          </p>
+                        </div>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(idx)}
+                            className="text-red-500 hover:text-red-700 p-1"
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        )}
                       </div>
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveItem(idx)}
-                          className="text-red-500 hover:text-red-700 p-1 self-end mb-1"
-                        >
-                          <Trash2 className="size-4" />
-                        </button>
-                      )}
                     </div>
 
                     <input
@@ -438,20 +571,47 @@ export function OrderModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 rounded-lg bg-[#edf1e8] p-3 text-xs">
-            <div>
-              <label className="font-semibold text-[#4e584f]">Discount (₹)</label>
-              <input
-                type="number"
-                min={0}
-                value={discount}
-                onChange={(e) => setDiscount(Number(e.target.value))}
-                className="mt-1 w-full rounded-md border border-[#d8ded2] bg-white px-2.5 py-1 text-xs focus:outline-none"
-              />
+          {/* Live Order Financial Summary Breakdown */}
+          <div className="rounded-xl border border-[#d8ded2] bg-[#f8faf6] p-4 space-y-3">
+            <div className="flex items-center gap-2 border-b border-[#edf1e8] pb-2">
+              <TrendingUp className="size-4 text-[#3f563f]" />
+              <span className="text-xs font-bold text-[#20231f]">Live Order Profitability Breakdown</span>
             </div>
-            <div className="flex flex-col justify-center text-right">
-              <span className="text-[#6b746c]">Subtotal: ₹{subtotal.toLocaleString()}</span>
-              <span className="text-base font-bold text-[#263326]">Total: ₹{total.toLocaleString()}</span>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-lg border border-[#edf1e8] bg-white p-2.5">
+                <span className="text-[10px] font-semibold text-amber-800 uppercase">Total COGS (Cost)</span>
+                <p className="mt-1 text-sm font-bold text-amber-900">₹{totalCogs.toLocaleString()}</p>
+              </div>
+              <div className="rounded-lg border border-[#edf1e8] bg-white p-2.5">
+                <span className="text-[10px] font-semibold text-[#6b746c] uppercase">Total Revenue</span>
+                <p className="mt-1 text-sm font-bold text-[#20231f]">₹{total.toLocaleString()}</p>
+              </div>
+              <div className="rounded-lg border border-[#edf1e8] bg-white p-2.5">
+                <span className="text-[10px] font-semibold text-emerald-800 uppercase">Projected Profit</span>
+                <p className="mt-1 text-sm font-bold text-emerald-950">₹{projectedGrossProfit.toLocaleString()}</p>
+              </div>
+              <div className="rounded-lg border border-[#edf1e8] bg-white p-2.5">
+                <span className="text-[10px] font-semibold text-emerald-800 uppercase">Gross Margin %</span>
+                <p className="mt-1 text-sm font-bold text-emerald-950">{overallGrossMarginPercent}%</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-[#edf1e8]">
+              <div>
+                <label className="font-semibold text-[#4e584f]">Order Discount (₹):</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={discount}
+                  onChange={(e) => setDiscount(Number(e.target.value))}
+                  className="ml-2 w-24 rounded-md border border-[#d8ded2] bg-white px-2 py-0.5 text-xs focus:outline-none"
+                />
+              </div>
+              <div className="text-right">
+                <span className="text-[#6b746c]">Subtotal: ₹{subtotal.toLocaleString()}</span>
+                <span className="ml-3 font-bold text-[#263326]">Final Total: ₹{total.toLocaleString()}</span>
+              </div>
             </div>
           </div>
 

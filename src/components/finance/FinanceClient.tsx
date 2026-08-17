@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit } from "lucide-react";
+import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart } from "lucide-react";
 import { PaymentModal } from "./PaymentModal";
 import { ExpenseModal } from "./ExpenseModal";
-
 import { calculateProfitMetrics, calculateOrderGrossProfit } from "@/lib/profit";
 
 export function FinanceClient({
@@ -13,29 +12,38 @@ export function FinanceClient({
   orders,
   partners,
   partnerTransactions = [],
+  products = [],
 }: {
   payments: Array<any>;
   expenses: Array<any>;
   orders: Array<any>;
   partners: Array<any>;
   partnerTransactions?: Array<any>;
+  products?: Array<any>;
 }) {
-  const [activeTab, setActiveTab] = useState<"PAYMENTS" | "EXPENSES" | "PROFITABILITY">("PAYMENTS");
+  const [activeTab, setActiveTab] = useState<"PAYMENTS" | "EXPENSES" | "PROFITABILITY" | "CAPITAL_RECOVERY">("PAYMENTS");
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [editingExpense, setEditingExpense] = useState<any>(null);
 
   const totalIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
 
   const {
     totalRevenue,
     totalCogs,
     grossProfit,
+    operatingExpenses,
+    inventoryStockPurchases,
+    capitalInvestments,
+    totalAllExpenses,
     netProfit,
     marginPercent,
-  } = calculateProfitMetrics({ orders, expenses, partnerTransactions });
+    inventoryAssetValuation,
+    totalCapitalInvested,
+    unrecoveredCapitalBalance,
+    capitalRecoveredPercent,
+  } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
 
   return (
     <div className="space-y-6">
@@ -43,7 +51,7 @@ export function FinanceClient({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Finance & Cashflow</h1>
           <p className="mt-1 text-sm text-[#6b746c]">
-            Track order payments received, business expenses, COGS, and order-level profit margins.
+            Asset-backed inventory valuation, OpEx vs CapEx separation, real-time COGS, and capital recovery tracking.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -74,33 +82,35 @@ export function FinanceClient({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between text-[#6b746c]">
-            <span className="text-xs font-semibold uppercase tracking-wider">Payments Collected</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Gross Revenue Collected</span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800">
               <ArrowUpRight className="size-4" />
             </div>
           </div>
           <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{totalIncome.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Total payments received</p>
         </div>
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between text-[#6b746c]">
-            <span className="text-xs font-semibold uppercase tracking-wider">Total Operating Expenses</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Inventory Asset Valuation</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-amber-100 text-amber-800">
+              <Package className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">On-hand physical stock value</p>
+        </div>
+
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-[#6b746c]">
+            <span className="text-xs font-semibold uppercase tracking-wider">Operating Overhead (OpEx)</span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-rose-100 text-rose-800">
               <ArrowDownRight className="size-4" />
             </div>
           </div>
-          <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{totalExpenses.toLocaleString()}</p>
-        </div>
-
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between text-[#6b746c]">
-            <span className="text-xs font-semibold uppercase tracking-wider">Gross Business Profit</span>
-            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800">
-              <TrendingUp className="size-4" />
-            </div>
-          </div>
-          <p className="mt-3 text-2xl font-bold text-emerald-950">₹{grossProfit.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">Revenue minus COGS</p>
+          <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{operatingExpenses.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Pure operating overheads</p>
         </div>
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
@@ -111,12 +121,12 @@ export function FinanceClient({
             </div>
           </div>
           <p className="mt-3 text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()} ({marginPercent}%)</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">After COGS, Expenses & Payouts</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Gross Profit minus OpEx</p>
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-[#d8ded2] pb-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#d8ded2] pb-3">
         <button
           onClick={() => setActiveTab("PAYMENTS")}
           className={`rounded-lg px-4 py-2 text-xs font-semibold transition ${
@@ -146,6 +156,16 @@ export function FinanceClient({
           }`}
         >
           Order Profitability Matrix
+        </button>
+        <button
+          onClick={() => setActiveTab("CAPITAL_RECOVERY")}
+          className={`rounded-lg px-4 py-2 text-xs font-semibold transition ${
+            activeTab === "CAPITAL_RECOVERY"
+              ? "bg-[#263326] text-white shadow-sm"
+              : "bg-white text-[#5f685e] border border-[#d8ded2] hover:bg-[#edf1e8]"
+          }`}
+        >
+          Capital Recovery & Assets
         </button>
       </div>
 
@@ -218,6 +238,7 @@ export function FinanceClient({
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
                   <tr>
+                    <th className="px-6 py-3.5">Classification Type</th>
                     <th className="px-6 py-3.5">Category & Description</th>
                     <th className="px-6 py-3.5">Linked Order</th>
                     <th className="px-6 py-3.5">Paid By</th>
@@ -227,37 +248,57 @@ export function FinanceClient({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#edf1e8]">
-                  {expenses.map((e) => (
-                    <tr key={e.id} className="hover:bg-[#fbfcf9]">
-                      <td className="px-6 py-4">
-                        <span className="rounded bg-[#edf1e8] px-2 py-0.5 text-xs font-semibold text-[#3f563f]">
-                          {e.category}
-                        </span>
-                        <p className="font-semibold text-[#20231f] mt-1">{e.description}</p>
-                      </td>
-                      <td className="px-6 py-4 text-xs font-mono text-[#4e584f]">
-                        {e.order ? e.order.orderNumber : "General Overhead"}
-                      </td>
-                      <td className="px-6 py-4 text-xs text-[#4e584f]">
-                        {e.paidBy?.name || "Company"}
-                      </td>
-                      <td className="px-6 py-4 text-xs text-[#4e584f]">
-                        {new Date(e.expenseDate).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 text-right font-bold text-rose-700">
-                        ₹{Number(e.amount).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          title="Edit Expense"
-                          onClick={() => setEditingExpense(e)}
-                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
-                        >
-                          <Edit className="size-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {expenses.map((e) => {
+                    const isCapEx = e.type === "INVENTORY_PURCHASE" || e.type === "CAPITAL_INVESTMENT";
+                    return (
+                      <tr key={e.id} className="hover:bg-[#fbfcf9]">
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex items-center rounded px-2.5 py-0.5 text-xs font-bold ${
+                              e.type === "INVENTORY_PURCHASE"
+                                ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                : e.type === "CAPITAL_INVESTMENT"
+                                ? "bg-purple-100 text-purple-900 border border-purple-300"
+                                : "bg-blue-50 text-blue-900 border border-blue-200"
+                            }`}
+                          >
+                            {e.type === "INVENTORY_PURCHASE"
+                              ? "📦 Bulk Stock Purchase (CapEx)"
+                              : e.type === "CAPITAL_INVESTMENT"
+                              ? "⚙️ Capital Asset"
+                              : "🏢 Operating Overhead (OpEx)"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="rounded bg-[#edf1e8] px-2 py-0.5 text-xs font-semibold text-[#3f563f]">
+                            {e.category}
+                          </span>
+                          <p className="font-semibold text-[#20231f] mt-1">{e.description}</p>
+                        </td>
+                        <td className="px-6 py-4 text-xs font-mono text-[#4e584f]">
+                          {e.order ? e.order.orderNumber : "General Overhead"}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-[#4e584f]">
+                          {e.paidBy?.name || "Company"}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-[#4e584f]">
+                          {new Date(e.expenseDate).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-4 text-right font-bold text-[#20231f]">
+                          ₹{Number(e.amount).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            title="Edit Expense"
+                            onClick={() => setEditingExpense(e)}
+                            className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                          >
+                            <Edit className="size-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -320,6 +361,51 @@ export function FinanceClient({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "CAPITAL_RECOVERY" && (
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-6 shadow-sm space-y-6">
+          <div>
+            <h3 className="text-base font-bold text-[#20231f]">Capital Investment & Recovery Dashboard</h3>
+            <p className="text-xs text-[#6b746c] mt-0.5">
+              Tracks initial inventory stock purchases, cash inflow recovery, and unsold warehouse assets.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rounded-lg border border-[#d8ded2] bg-[#f8faf6] p-4">
+              <span className="text-xs font-bold text-[#4e584f] uppercase">Total Capital Invested</span>
+              <p className="mt-2 text-2xl font-bold text-[#20231f]">₹{totalCapitalInvested.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-[#6b746c]">Bulk Stock Purchases & CapEx</p>
+            </div>
+
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
+              <span className="text-xs font-bold text-emerald-900 uppercase">Cash Recovered (Inflows)</span>
+              <p className="mt-2 text-2xl font-bold text-emerald-950">₹{totalRevenue.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-emerald-800">Customer order payments collected</p>
+            </div>
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+              <span className="text-xs font-bold text-amber-900 uppercase">Unrecovered Capital Balance</span>
+              <p className="mt-2 text-2xl font-bold text-amber-950">₹{unrecoveredCapitalBalance.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-amber-800">Covered by ₹{inventoryAssetValuation.toLocaleString()} warehouse stock</p>
+            </div>
+          </div>
+
+          {/* Capital Recovery Progress */}
+          <div className="rounded-lg border border-[#d8ded2] bg-white p-4 space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold text-[#20231f]">
+              <span>Capital Recovery Rate</span>
+              <span>{capitalRecoveredPercent}%</span>
+            </div>
+            <div className="h-3 w-full rounded-full bg-[#edf1e8] overflow-hidden">
+              <div
+                className="h-full bg-[#263326] transition-all duration-500"
+                style={{ width: `${Math.min(100, Number(capitalRecoveredPercent))}%` }}
+              />
+            </div>
           </div>
         </div>
       )}

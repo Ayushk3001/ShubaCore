@@ -25,6 +25,20 @@ export interface ProductBundleWithItems {
 }
 
 /**
+ * Calculates composite cost for a bundle:
+ * Bundle Cost = sum(BundleItem.quantity * Product.purchaseCost)
+ */
+export function calculateBundleCost(
+  items: Array<{ quantity: number; product?: { purchaseCost: number | any } }>
+): number {
+  if (!items || items.length === 0) return 0;
+  return items.reduce((sum, item) => {
+    const cost = item.product ? Number(item.product.purchaseCost) : 0;
+    return sum + item.quantity * cost;
+  }, 0);
+}
+
+/**
  * Calculates live pricing for a bundle.
  * - FIXED: Uses fixed bundlePrice.
  * - DYNAMIC_SUM: Calculates sum of (component unit purchaseCost * component quantity).
@@ -37,10 +51,7 @@ export function calculateBundlePrice(
   if (pricingType === "FIXED" && fixedPrice !== null && fixedPrice !== undefined) {
     return Number(fixedPrice);
   }
-  return items.reduce((sum, item) => {
-    const cost = item.product ? Number(item.product.purchaseCost) : 0;
-    return sum + item.quantity * cost;
-  }, 0);
+  return calculateBundleCost(items);
 }
 
 /**

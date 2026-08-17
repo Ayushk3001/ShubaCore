@@ -8,6 +8,7 @@ interface ExpenseModalProps {
   expense?: {
     id: string;
     category: any;
+    type?: any;
     amount: any;
     description: string;
     orderId: string | null;
@@ -49,6 +50,7 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
     const formData = new FormData(e.currentTarget);
     const data = {
       category: formData.get("category") as any,
+      type: (formData.get("type") as any) || "OPERATING_EXPENSE",
       amount: Number(formData.get("amount")),
       description: (formData.get("description") as string) || "",
       orderId: (formData.get("orderId") as string) || undefined,
@@ -86,9 +88,14 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-md rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
-          <h2 className="text-lg font-bold text-[#20231f]">
-            {isEditing ? "Edit Business Expense" : "Record Business Expense"}
-          </h2>
+          <div>
+            <h2 className="text-lg font-bold text-[#20231f]">
+              {isEditing ? "Edit Business Expense" : "Record Business Expense"}
+            </h2>
+            <p className="text-xs text-[#6b746c]">
+              Distinguish Operating Overhead (OpEx) from Bulk Stock Purchases (CapEx).
+            </p>
+          </div>
           <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
             <X className="size-5" />
           </button>
@@ -101,6 +108,24 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-[#4e584f]">Expense Classification Type *</label>
+            <select
+              name="type"
+              required
+              defaultValue={expense?.type || "OPERATING_EXPENSE"}
+              className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#f8faf6] px-3 py-2 text-xs font-bold text-[#20231f] focus:border-[#3f563f] focus:outline-none"
+            >
+              <option value="OPERATING_EXPENSE">🏢 Operating Overhead (OpEx) — Rent, Logistics, Transport, Tools</option>
+              <option value="INVENTORY_PURCHASE">📦 Bulk Stock Purchase (CapEx) — Asset Purchase (Prevents Double-Counting)</option>
+              <option value="CAPITAL_INVESTMENT">⚙️ Capital Investment — Equipment, Machinery, Founding Assets</option>
+              <option value="OTHER">⚡ Other Miscellaneous</option>
+            </select>
+            <p className="mt-1 text-[11px] text-[#6b746c]">
+              *Operating Overhead is deducted from Net Profit. Bulk Stock Purchases are tracked as capital outflows & asset acquisitions.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[#4e584f]">Category *</label>

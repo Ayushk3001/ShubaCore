@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { X, DollarSign, TrendingUp, CreditCard, Receipt, CheckCircle, Clock, MapPin, Tag, Edit, PackageCheck } from "lucide-react";
-import { updateOrderStatusAction } from "@/lib/actions";
+import { X, DollarSign, TrendingUp, CreditCard, Receipt, CheckCircle, Clock, MapPin, Tag, Edit, PackageCheck, Trash2, Loader2 } from "lucide-react";
+import { updateOrderStatusAction, deleteOrderAction } from "@/lib/actions";
 
 interface OrderDetailModalProps {
   order: {
@@ -65,6 +65,7 @@ const ORDER_STATUSES = [
 
 export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetailModalProps) {
   const [loading, setLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [error, setError] = useState("");
 
   if (!isOpen || !order) return null;
@@ -89,6 +90,27 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
       setError(e.message || "Failed to update order status.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDeleteOrder() {
+    if (!order) return;
+    if (!confirm(`Are you sure you want to permanently delete Order ${order.orderNumber}? If stock was deducted, it will be automatically returned to inventory.`)) {
+      return;
+    }
+    setDeleteLoading(true);
+    setError("");
+    try {
+      const res = await deleteOrderAction(order.id);
+      if (!res.success) {
+        setError(res.error || "Failed to delete order.");
+      } else {
+        onClose();
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to delete order.");
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -121,6 +143,19 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
                 <Edit className="size-3.5" /> Edit Order
               </button>
             )}
+            <button
+              type="button"
+              disabled={deleteLoading}
+              onClick={handleDeleteOrder}
+              className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:opacity-50"
+            >
+              {deleteLoading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              Delete
+            </button>
             <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
               <X className="size-5" />
             </button>

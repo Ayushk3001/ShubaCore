@@ -16,11 +16,18 @@ interface OrderLike {
 
 interface ExpenseLike {
   amount: number | any;
+  type?: "OPERATING_EXPENSE" | "INVENTORY_PURCHASE" | "CAPITAL_INVESTMENT" | "OTHER" | string;
+  category?: string;
 }
 
 interface PartnerTransactionLike {
   type: string;
   amount: number | any;
+}
+
+interface ProductLike {
+  currentStock: number | any;
+  purchaseCost: number | any;
 }
 
 export function calculateOrderGrossProfit(order: {
@@ -41,10 +48,12 @@ export function calculateProfitMetrics({
   orders = [],
   expenses = [],
   partnerTransactions = [],
+  products = [],
 }: {
   orders?: OrderLike[];
   expenses?: ExpenseLike[];
   partnerTransactions?: PartnerTransactionLike[];
+  products?: ProductLike[];
 }) {
   // Exclude CANCELLED orders from revenue/cogs calculation
   const activeOrders = orders.filter((o) => o.status !== "CANCELLED");
@@ -63,23 +72,59 @@ export function calculateProfitMetrics({
     return sum + calculateOrderGrossProfit(o);
   }, 0);
 
-  const totalOperatingExpenses = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  // Separate OpEx (Operating Overhead) from Inventory Stock Purchases & Capital Investments
+  const operatingExpenses = expenses
+    .filter((e) => !e.type || e.type === "OPERATING_EXPENSE" || e.type === "OTHER")
+    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+  const inventoryStockPurchases = expenses
+    .filter((e) => e.type === "INVENTORY_PURCHASE")
+    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+  const capitalInvestments = expenses
+    .filter((e) => e.type === "CAPITAL_INVESTMENT")
+    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+  const totalAllExpenses = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   const partnerPayouts = partnerTransactions
     .filter((t) => t.type === "WITHDRAWAL" || t.type === "REIMBURSEMENT")
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-  const netProfit = grossProfit - (totalOperatingExpenses + partnerPayouts);
+  // Net Operating Profit = Gross Profit - Operating Overhead - Partner Payouts
+  const netProfit = grossProfit - (operatingExpenses + partnerPayouts);
 
   const marginPercent = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+  // Physical Inventory Asset Valuation in Warehouse = sum(currentStock * purchaseCost)
+  const inventoryAssetValuation = products.reduce((sum, p) => {
+    const stock = Number(p.currentStock || 0);
+    const cost = Number(p.purchaseCost || 0);
+    return sum + (stock > 0 ? stock * cost : 0);
+  }, 0);
+
+  // Capital Recovery Tracking
+  const totalCapitalInvested = inventoryStockPurchases + capitalInvestments;
+  const unrecoveredCapitalBalance = Math.max(0, totalCapitalInvested - totalRevenue);
+  const capitalRecoveredPercent =
+    totalCapitalInvested > 0
+      ? Math.min(100, (totalRevenue / totalCapitalInvested) * 100)
+      : 100;
 
   return {
     totalRevenue,
     totalCogs,
     grossProfit,
-    totalOperatingExpenses,
+    operatingExpenses,
+    inventoryStockPurchases,
+    capitalInvestments,
+    totalAllExpenses,
     partnerPayouts,
     netProfit,
     marginPercent: marginPercent.toFixed(1),
+    inventoryAssetValuation,
+    totalCapitalInvested,
+    unrecoveredCapitalBalance,
+    capitalRecoveredPercent: capitalRecoveredPercent.toFixed(1),
   };
 }

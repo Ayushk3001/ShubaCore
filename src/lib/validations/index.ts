@@ -38,6 +38,12 @@ export const ExpenseCategoryEnum = z.enum([
   "SUPPLIER_PAYMENT",
   "MISCELLANEOUS",
 ]);
+export const ExpenseTypeEnum = z.enum([
+  "OPERATING_EXPENSE",
+  "INVENTORY_PURCHASE",
+  "CAPITAL_INVESTMENT",
+  "OTHER",
+]);
 export const PartnerTransactionTypeEnum = z.enum([
   "INITIAL_INVESTMENT",
   "ADDITIONAL_INVESTMENT",
@@ -128,6 +134,14 @@ export const orderItemSchema = z.object({
   description: requiredStringSchema,
   quantity: z.coerce.number().int().positive("Quantity must be at least 1"),
   unitPrice: moneySchema,
+  costPrice: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? undefined : Number(val)),
+    moneySchema.optional()
+  ),
+  marginRate: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? undefined : Number(val)),
+    z.number().optional()
+  ),
   customizationDetails: optionalStringSchema,
 });
 
@@ -168,6 +182,7 @@ export const paymentSchema = z.object({
 // Expense Validation
 export const expenseSchema = z.object({
   category: ExpenseCategoryEnum,
+  type: ExpenseTypeEnum.default("OPERATING_EXPENSE"),
   amount: positiveMoneySchema,
   description: requiredStringSchema,
   orderId: optionalStringSchema,

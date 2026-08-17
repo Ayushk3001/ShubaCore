@@ -18,7 +18,7 @@ import {
 export default async function DashboardPage() {
   const user = await requireUser();
 
-  const [orders, payments, expenses, partnerTransactions, leads, customers, allOrders] = await Promise.all([
+  const [orders, payments, expenses, partnerTransactions, leads, customers, allOrders, products] = await Promise.all([
     prisma.order.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
@@ -32,17 +32,22 @@ export default async function DashboardPage() {
     prisma.order.findMany({
       select: { total: true, status: true, source: true, discount: true, items: true },
     }),
+    prisma.product.findMany({
+      where: { isActive: true },
+      select: { id: true, currentStock: true, purchaseCost: true },
+    }),
   ]);
 
   const {
     totalRevenue,
     grossProfit,
+    operatingExpenses,
+    inventoryAssetValuation,
     netProfit,
     marginPercent,
-  } = calculateProfitMetrics({ orders: allOrders, expenses, partnerTransactions });
+  } = calculateProfitMetrics({ orders: allOrders, expenses, partnerTransactions, products });
 
   const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
   const activeOrdersCount = allOrders.filter((o) => !["COMPLETED", "CANCELLED"].includes(o.status)).length;
 
   return (
@@ -84,7 +89,7 @@ export default async function DashboardPage() {
             </div>
           </div>
           <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{totalRevenue.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">From all order quotations</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">From active order quotations</p>
         </div>
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
@@ -100,13 +105,13 @@ export default async function DashboardPage() {
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[#6b746c]">Operating Expenses</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-[#6b746c]">Operating Overhead (OpEx)</span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-rose-100 text-rose-900">
               <Receipt className="size-4" />
             </div>
           </div>
-          <p className="mt-3 text-2xl font-bold text-rose-950">₹{totalExpenses.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">Materials, packaging, delivery</p>
+          <p className="mt-3 text-2xl font-bold text-rose-950">₹{operatingExpenses.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Logistics, tools, overheads</p>
         </div>
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">

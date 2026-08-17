@@ -55,8 +55,11 @@ async function generateLeadNumber(offset = 0): Promise<string> {
 // Helper to resolve unit cost price snapshot for an order item
 async function getItemCostPriceSnapshot(
   tx: Prisma.TransactionClient,
-  item: { productId?: string | null; bundleId?: string | null }
+  item: { productId?: string | null; bundleId?: string | null; costPrice?: number | null }
 ): Promise<Prisma.Decimal> {
+  if (item.costPrice !== undefined && item.costPrice !== null && !isNaN(Number(item.costPrice)) && Number(item.costPrice) >= 0) {
+    return new Decimal(item.costPrice);
+  }
   if (item.bundleId) {
     const bundle = await tx.productBundle.findUnique({
       where: { id: item.bundleId },
@@ -541,6 +544,7 @@ export async function createOrderAction(formData: unknown) {
                 quantity: item.quantity,
                 unitPrice: new Decimal(item.unitPrice),
                 costPriceSnapshot,
+                marginRate: item.marginRate !== undefined && item.marginRate !== null ? Number(item.marginRate) : null,
                 customizationDetails: item.customizationDetails || null,
               };
             })
@@ -663,6 +667,7 @@ export async function updateOrderAction(id: string, formData: unknown) {
             quantity: item.quantity,
             unitPrice: new Decimal(item.unitPrice),
             costPriceSnapshot,
+            marginRate: item.marginRate !== undefined && item.marginRate !== null ? Number(item.marginRate) : null,
             customizationDetails: item.customizationDetails || null,
           };
         })
@@ -709,6 +714,92 @@ export async function updateOrderAction(id: string, formData: unknown) {
     return { success: true as const, order: serializeData(order) };
   } catch (err) {
     return formatError(err, "Failed to update order.");
+  }
+}
+
+export async function deleteOrderAction(id: string) {
+  try {
+    const user = await requireUser();
+
+    await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.order.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: {
+              product: true,
+              bundle: { include: { bundleItems: { include: { product: true } } } },
+            },
+          },
+        },
+      });
+
+      if (!existingOrder) {
+        throw new Error("Order not found.");
+      }
+
+      // If stock was deducted for this order, restore stock level back to inventory
+      if (existingOrder.stockDeducted) {
+        for (const item of existingOrder.items) {
+          if (item.bundleId && item.bundle) {
+            for (const bItem of item.bundle.bundleItems) {
+              const qtyToRestore = bItem.quantity * item.quantity;
+              await tx.product.update({
+                where: { id: bItem.productId },
+                data: { currentStock: { increment: qtyToRestore } },
+              });
+              await tx.stockMovement.create({
+                data: {
+                  productId: bItem.productId,
+                  orderId: existingOrder.id,
+                  type: "RETURN",
+                  quantity: qtyToRestore,
+                  reference: `Order ${existingOrder.orderNumber} deleted - Stock returned to inventory`,
+                  createdById: user.id,
+                },
+              });
+            }
+          } else if (item.productId && item.product) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { currentStock: { increment: item.quantity } },
+            });
+            await tx.stockMovement.create({
+              data: {
+                productId: item.productId,
+                orderId: existingOrder.id,
+                type: "RETURN",
+                quantity: item.quantity,
+                reference: `Order ${existingOrder.orderNumber} deleted - Stock returned to inventory`,
+                createdById: user.id,
+              },
+            });
+          }
+        }
+      }
+
+      await tx.order.delete({
+        where: { id },
+      });
+
+      await logAudit({
+        actorId: user.id,
+        action: "DELETE_ORDER",
+        entityType: "Order",
+        entityId: id,
+        metadata: { orderNumber: existingOrder.orderNumber },
+        tx,
+      });
+    });
+
+    revalidatePath("/orders");
+    revalidatePath("/inventory");
+    revalidatePath("/finance");
+    revalidatePath("/reports");
+    revalidatePath("/dashboard");
+    return { success: true as const, id };
+  } catch (err) {
+    return formatError(err, "Failed to delete order.");
   }
 }
 
@@ -861,6 +952,7 @@ export async function createExpenseAction(formData: unknown) {
     const expense = await prisma.expense.create({
       data: {
         category: parsed.category,
+        type: parsed.type || "OPERATING_EXPENSE",
         amount: new Decimal(parsed.amount),
         description: parsed.description,
         orderId: parsed.orderId || null,
@@ -876,7 +968,7 @@ export async function createExpenseAction(formData: unknown) {
       action: "RECORD_EXPENSE",
       entityType: "Expense",
       entityId: expense.id,
-      metadata: { amount: parsed.amount, category: parsed.category },
+      metadata: { amount: parsed.amount, category: parsed.category, type: parsed.type },
     });
 
     revalidatePath("/finance");
@@ -900,6 +992,7 @@ export async function updateExpenseAction(id: string, formData: unknown) {
       where: { id },
       data: {
         category: parsed.category,
+        type: parsed.type || "OPERATING_EXPENSE",
         amount: new Decimal(parsed.amount),
         description: parsed.description,
         orderId: parsed.orderId || null,
@@ -1389,5 +1482,57 @@ export async function getBundlesAction() {
     return { success: true as const, bundles: serializeData(bundles) };
   } catch (err) {
     return formatError(err, "Failed to fetch product bundles.");
+  }
+}
+
+export async function backfillHistoricalOrderCostsAction() {
+  try {
+    const user = await requireUser();
+
+    const orderItems = await prisma.orderItem.findMany({
+      include: {
+        product: true,
+        bundle: {
+          include: {
+            bundleItems: {
+              include: { product: true },
+            },
+          },
+        },
+      },
+    });
+
+    let updatedCount = 0;
+
+    for (const item of orderItems) {
+      let cost = 0;
+      if (item.bundleId && item.bundle) {
+        cost = item.bundle.bundleItems.reduce((sum, bItem) => {
+          return sum + bItem.quantity * Number(bItem.product?.purchaseCost || 0);
+        }, 0);
+      } else if (item.productId && item.product) {
+        cost = Number(item.product.purchaseCost || 0);
+      }
+
+      const unitPrice = Number(item.unitPrice || 0);
+      const marginRate = cost > 0 ? ((unitPrice - cost) / cost) * 100 : 0;
+
+      await prisma.orderItem.update({
+        where: { id: item.id },
+        data: {
+          costPriceSnapshot: new Decimal(cost),
+          marginRate,
+        },
+      });
+      updatedCount++;
+    }
+
+    revalidatePath("/orders");
+    revalidatePath("/finance");
+    revalidatePath("/reports");
+    revalidatePath("/dashboard");
+    return { success: true as const, updatedCount };
+  } catch (err) {
+    return formatError(err, "Failed to backfill historical order costs.");
   }
 }

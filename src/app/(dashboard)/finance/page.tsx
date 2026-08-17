@@ -6,7 +6,7 @@ import { serializeData } from "@/lib/serialize";
 export default async function FinancePage() {
   await requireUser();
 
-  const [payments, expenses, orders, partners, partnerTransactions] = await Promise.all([
+  const [payments, expenses, orders, partners, partnerTransactions, products] = await Promise.all([
     prisma.payment.findMany({
       orderBy: { paidAt: "desc" },
       include: {
@@ -35,6 +35,10 @@ export default async function FinancePage() {
       select: { id: true, name: true },
     }),
     prisma.partnerTransaction.findMany(),
+    prisma.product.findMany({
+      where: { isActive: true },
+      select: { id: true, currentStock: true, purchaseCost: true },
+    }),
   ]);
 
   return (
@@ -44,6 +48,7 @@ export default async function FinancePage() {
       orders={serializeData(orders) as any}
       partners={serializeData(partners)}
       partnerTransactions={serializeData(partnerTransactions) as any}
+      products={serializeData(products) as any}
     />
   );
 }

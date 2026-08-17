@@ -75,6 +75,13 @@ enum ExpenseCategory {
   MISCELLANEOUS
 }
 
+enum ExpenseType {
+  OPERATING_EXPENSE
+  INVENTORY_PURCHASE
+  CAPITAL_INVESTMENT
+  OTHER
+}
+
 enum PartnerTransactionType {
   INITIAL_INVESTMENT
   ADDITIONAL_INVESTMENT
@@ -201,10 +208,11 @@ model OrderItem {
   quantity             Int
   unitPrice            Decimal        @db.Decimal(12, 2)
   costPriceSnapshot    Decimal        @default(0) @db.Decimal(12, 2)
+  marginRate           Float?
   customizationDetails String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
-  order                Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  order                Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product              Product?       @relation(fields: [productId], references: [id], onDelete: SetNull)
   bundle               ProductBundle? @relation(fields: [bundleId], references: [id], onDelete: SetNull)
 
@@ -225,7 +233,7 @@ model Payment {
   notes        String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   receivedBy   User?         @relation("PaymentReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
 
   @@index([orderId])
@@ -235,6 +243,7 @@ model Payment {
 model Expense {
   id          String          @id @default(cuid())
   category    ExpenseCategory
+  type        ExpenseType     @default(OPERATING_EXPENSE)
   amount      Decimal         @db.Decimal(12, 2)
   description String
   orderId     String?
@@ -251,6 +260,7 @@ model Expense {
   @@index([orderId])
   @@index([expenseDate])
   @@index([category])
+  @@index([type])
 }
 
 model PartnerTransaction {
