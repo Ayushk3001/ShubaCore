@@ -1,5 +1,3 @@
-import "server-only";
-
 interface OrderItemLike {
   quantity: number;
   unitPrice: number | any;
