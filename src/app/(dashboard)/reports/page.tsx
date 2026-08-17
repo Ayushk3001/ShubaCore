@@ -1,27 +1,34 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag } from "lucide-react";
+import { calculateProfitMetrics } from "@/lib/profit";
+import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag, Coins } from "lucide-react";
 
 export default async function ReportsPage() {
   await requireUser();
 
-  const [orders, expenses, partners, leads] = await Promise.all([
+  const [orders, expenses, partnerTransactions, partners, leads] = await Promise.all([
     prisma.order.findMany({
-      include: { assignedPartner: true, payments: true, expenses: true },
+      include: { assignedPartner: true, payments: true, expenses: true, items: true },
     }),
     prisma.expense.findMany(),
+    prisma.partnerTransaction.findMany(),
     prisma.user.findMany({ where: { role: "PARTNER" } }),
     prisma.lead.findMany(),
   ]);
 
-  const totalRevenue = orders.reduce((sum, o) => sum + Number(o.total), 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const netProfit = totalRevenue - totalExpenses;
-  const marginPercent = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : "0";
+  const {
+    totalRevenue,
+    totalCogs,
+    grossProfit,
+    totalOperatingExpenses,
+    partnerPayouts,
+    netProfit,
+    marginPercent,
+  } = calculateProfitMetrics({ orders, expenses, partnerTransactions });
 
   // Revenue by Partner
   const revenueByPartner = partners.map((p) => {
-    const partnerOrders = orders.filter((o) => o.assignedPartnerId === p.id);
+    const partnerOrders = orders.filter((o) => o.assignedPartnerId === p.id && o.status !== "CANCELLED");
     const rev = partnerOrders.reduce((sum, o) => sum + Number(o.total), 0);
     return { name: p.name, revenue: rev, count: partnerOrders.length };
   });
@@ -45,7 +52,7 @@ export default async function ReportsPage() {
   };
 
   const revenueBySource = sources.map((src) => {
-    const srcOrders = orders.filter((o) => o.source === src);
+    const srcOrders = orders.filter((o) => o.source === src && o.status !== "CANCELLED");
     const rev = srcOrders.reduce((sum, o) => sum + Number(o.total), 0);
     return { source: src, label: SOURCE_LABELS[src] || src, revenue: rev, count: srcOrders.length };
   });
@@ -60,14 +67,22 @@ export default async function ReportsPage() {
       </div>
 
       {/* Top Level P&L */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-[#6b746c]">Gross Order Revenue</p>
           <p className="mt-2 text-xl sm:text-2xl font-bold text-[#20231f]">₹{totalRevenue.toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase text-amber-800">Total COGS (Direct Cost)</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-amber-900">₹{totalCogs.toLocaleString()}</p>
+        </div>
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase text-emerald-800">Gross Profit (Rev - COGS)</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-emerald-900">₹{grossProfit.toLocaleString()}</p>
+        </div>
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-rose-800">Total Operating Expenses</p>
-          <p className="mt-2 text-xl sm:text-2xl font-bold text-rose-900">₹{totalExpenses.toLocaleString()}</p>
+          <p className="mt-2 text-xl sm:text-2xl font-bold text-rose-900">₹{totalOperatingExpenses.toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-[#d8ded2] bg-white p-4 sm:p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase text-blue-800">Net Business Profit</p>

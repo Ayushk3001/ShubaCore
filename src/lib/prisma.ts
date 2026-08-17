@@ -14,12 +14,9 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
-// In dev mode, refresh cached client if new models (e.g. product) are missing from cached instance
+// In dev mode, refresh cached client if new fields or models are added
 const cachedPrisma = globalForPrisma.prisma;
-export const prisma =
-  cachedPrisma && (cachedPrisma as any).product
-    ? cachedPrisma
-    : createPrismaClient();
+export const prisma = createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;

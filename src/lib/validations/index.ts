@@ -46,6 +46,7 @@ export const PartnerTransactionTypeEnum = z.enum([
   "WITHDRAWAL",
   "OTHER",
 ]);
+export const SupplierTypeEnum = z.enum(["LEAD", "CONFIRMED"]);
 
 // Customer Validation
 export const customerSchema = z.object({
@@ -193,6 +194,7 @@ export const supplierSchema = z.object({
   email: optionalEmailSchema,
   address: optionalStringSchema,
   notes: optionalStringSchema,
+  type: SupplierTypeEnum.default("CONFIRMED"),
 });
 
 // Product Validation

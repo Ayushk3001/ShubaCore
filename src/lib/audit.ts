@@ -9,15 +9,18 @@ export async function logAudit({
   entityType,
   entityId,
   metadata,
+  tx,
 }: {
   actorId?: string | null;
   action: string;
   entityType: string;
   entityId: string;
   metadata?: Record<string, unknown>;
+  tx?: Prisma.TransactionClient;
 }) {
   try {
-    await prisma.auditLog.create({
+    const client = tx || prisma;
+    await client.auditLog.create({
       data: {
         actorId: actorId ?? null,
         action,

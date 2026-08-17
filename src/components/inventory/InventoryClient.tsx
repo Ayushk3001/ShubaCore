@@ -22,6 +22,7 @@ export function InventoryClient({
 }) {
   const [activeTab, setActiveTab] = useState<"PRODUCTS" | "BUNDLES" | "SUPPLIERS" | "MOVEMENTS">("PRODUCTS");
   const [search, setSearch] = useState("");
+  const [supplierTypeFilter, setSupplierTypeFilter] = useState<"ALL" | "CONFIRMED" | "LEAD">("ALL");
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
@@ -41,10 +42,15 @@ export function InventoryClient({
   );
 
   const filteredSuppliers = suppliers.filter(
-    (s) =>
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.phone.includes(search) ||
-      (s.contactPerson && s.contactPerson.toLowerCase().includes(search.toLowerCase()))
+    (s) => {
+      const matchesSearch =
+        s.name.toLowerCase().includes(search.toLowerCase()) ||
+        s.phone.includes(search) ||
+        (s.contactPerson && s.contactPerson.toLowerCase().includes(search.toLowerCase()));
+      const matchesType =
+        supplierTypeFilter === "ALL" || (s.type || "CONFIRMED") === supplierTypeFilter;
+      return matchesSearch && matchesType;
+    }
   );
 
   const filteredBundles = bundles.filter(
@@ -384,54 +390,104 @@ export function InventoryClient({
 
       {/* Tab: Suppliers */}
       {activeTab === "SUPPLIERS" && (
-        <div className="overflow-hidden rounded-xl border border-[#d8ded2] bg-white shadow-sm">
-          {filteredSuppliers.length === 0 ? (
-            <div className="p-12 text-center text-[#6b746c] text-sm">No suppliers found.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
-                  <tr>
-                    <th className="px-6 py-3.5">Vendor Name</th>
-                    <th className="px-6 py-3.5">Contact Person & Phone</th>
-                    <th className="px-6 py-3.5">Address</th>
-                    <th className="px-6 py-3.5">Supplied SKUs</th>
-                    <th className="px-6 py-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#edf1e8]">
-                  {filteredSuppliers.map((s) => (
-                    <tr key={s.id} className="hover:bg-[#fbfcf9] transition">
-                      <td className="px-6 py-4">
-                        <p className="font-semibold text-[#20231f]">{s.name}</p>
-                        {s.email && <p className="text-xs text-[#6b746c]">{s.email}</p>}
-                      </td>
-                      <td className="px-6 py-4 text-xs">
-                        <p className="font-medium text-[#20231f]">{s.contactPerson || "—"}</p>
-                        <p className="text-[#6b746c]">{s.phone}</p>
-                      </td>
-                      <td className="px-6 py-4 text-xs text-[#4e584f]">
-                        {s.address || "—"}
-                      </td>
-                      <td className="px-6 py-4 text-xs">
-                        <span className="rounded bg-[#edf1e8] px-2 py-1 font-semibold text-[#3f563f]">
-                          {s.products.length} Products
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => handleEditSupplier(s)}
-                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
-                        >
-                          <Edit2 className="size-4" />
-                        </button>
-                      </td>
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSupplierTypeFilter("ALL")}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                supplierTypeFilter === "ALL"
+                  ? "bg-[#263326] text-white shadow-sm"
+                  : "bg-white text-[#5f685e] border border-[#d8ded2] hover:bg-[#edf1e8]"
+              }`}
+            >
+              All Vendors ({suppliers.length})
+            </button>
+            <button
+              onClick={() => setSupplierTypeFilter("CONFIRMED")}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                supplierTypeFilter === "CONFIRMED"
+                  ? "bg-[#263326] text-white shadow-sm"
+                  : "bg-white text-[#5f685e] border border-[#d8ded2] hover:bg-[#edf1e8]"
+              }`}
+            >
+              Confirmed Vendors ({suppliers.filter((s) => (s.type || "CONFIRMED") === "CONFIRMED").length})
+            </button>
+            <button
+              onClick={() => setSupplierTypeFilter("LEAD")}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                supplierTypeFilter === "LEAD"
+                  ? "bg-[#263326] text-white shadow-sm"
+                  : "bg-white text-[#5f685e] border border-[#d8ded2] hover:bg-[#edf1e8]"
+              }`}
+            >
+              Vendor Leads ({suppliers.filter((s) => s.type === "LEAD").length})
+            </button>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-[#d8ded2] bg-white shadow-sm">
+            {filteredSuppliers.length === 0 ? (
+              <div className="p-12 text-center text-[#6b746c] text-sm">No suppliers found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
+                    <tr>
+                      <th className="px-6 py-3.5">Vendor Name</th>
+                      <th className="px-6 py-3.5">Vendor Status</th>
+                      <th className="px-6 py-3.5">Contact Person & Phone</th>
+                      <th className="px-6 py-3.5">Address</th>
+                      <th className="px-6 py-3.5">Supplied SKUs</th>
+                      <th className="px-6 py-3.5 text-right">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody className="divide-y divide-[#edf1e8]">
+                    {filteredSuppliers.map((s) => {
+                      const isLead = s.type === "LEAD";
+                      return (
+                        <tr key={s.id} className="hover:bg-[#fbfcf9] transition">
+                          <td className="px-6 py-4">
+                            <p className="font-semibold text-[#20231f]">{s.name}</p>
+                            {s.email && <p className="text-xs text-[#6b746c]">{s.email}</p>}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span
+                              className={`inline-flex items-center rounded px-2.5 py-0.5 text-xs font-semibold ${
+                                isLead
+                                  ? "bg-amber-100 text-amber-900 border border-amber-200"
+                                  : "bg-emerald-100 text-emerald-900 border border-emerald-200"
+                              }`}
+                            >
+                              {isLead ? "Vendor Lead" : "Confirmed Vendor"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-xs">
+                            <p className="font-medium text-[#20231f]">{s.contactPerson || "—"}</p>
+                            <p className="text-[#6b746c]">{s.phone}</p>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-[#4e584f]">
+                            {s.address || "—"}
+                          </td>
+                          <td className="px-6 py-4 text-xs">
+                            <span className="rounded bg-[#edf1e8] px-2 py-1 font-semibold text-[#3f563f]">
+                              {s.products?.length || 0} Products
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              onClick={() => handleEditSupplier(s)}
+                              className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
+                            >
+                              <Edit2 className="size-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

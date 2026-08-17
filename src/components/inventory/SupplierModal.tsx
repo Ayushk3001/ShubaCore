@@ -13,6 +13,7 @@ interface SupplierModalProps {
     email: string | null;
     address: string | null;
     notes: string | null;
+    type?: "LEAD" | "CONFIRMED";
   } | null;
   isOpen: boolean;
   onClose: () => void;
@@ -39,6 +40,7 @@ export function SupplierModal({ supplier, isOpen, onClose }: SupplierModalProps)
       email: (formData.get("email") as string) || undefined,
       address: (formData.get("address") as string) || undefined,
       notes: (formData.get("notes") as string) || undefined,
+      type: (formData.get("type") as any) || "CONFIRMED",
     };
 
     try {
@@ -81,16 +83,30 @@ export function SupplierModal({ supplier, isOpen, onClose }: SupplierModalProps)
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-[#4e584f]">Company / Vendor Name *</label>
-            <input
-              type="text"
-              name="name"
-              defaultValue={supplier?.name || ""}
-              required
-              placeholder="e.g. Royal Brass Handicrafts Pvt Ltd"
-              className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
-            />
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-[#4e584f]">Company / Vendor Name *</label>
+              <input
+                type="text"
+                name="name"
+                defaultValue={supplier?.name || ""}
+                required
+                placeholder="e.g. Royal Brass Handicrafts Pvt Ltd"
+                className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#4e584f]">Vendor Type *</label>
+              <select
+                name="type"
+                required
+                defaultValue={supplier?.type || "CONFIRMED"}
+                className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-2 py-2 text-sm focus:border-[#3f563f] focus:outline-none font-semibold text-[#20231f]"
+              >
+                <option value="CONFIRMED">Confirmed</option>
+                <option value="LEAD">Vendor Lead</option>
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { calculateProfitMetrics } from "@/lib/profit";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -17,7 +18,7 @@ import {
 export default async function DashboardPage() {
   const user = await requireUser();
 
-  const [orders, payments, expenses, leads, customers] = await Promise.all([
+  const [orders, payments, expenses, partnerTransactions, leads, customers, allOrders] = await Promise.all([
     prisma.order.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
@@ -25,15 +26,23 @@ export default async function DashboardPage() {
     }),
     prisma.payment.findMany(),
     prisma.expense.findMany(),
+    prisma.partnerTransaction.findMany(),
     prisma.lead.findMany({ where: { stage: { notIn: ["WON", "LOST"] } } }),
     prisma.customer.count(),
+    prisma.order.findMany({
+      select: { total: true, status: true, source: true, discount: true, items: true },
+    }),
   ]);
 
-  const allOrders = await prisma.order.findMany({ select: { total: true, status: true, source: true } });
-  const totalRevenue = allOrders.reduce((sum, o) => sum + Number(o.total), 0);
+  const {
+    totalRevenue,
+    grossProfit,
+    netProfit,
+    marginPercent,
+  } = calculateProfitMetrics({ orders: allOrders, expenses, partnerTransactions });
+
   const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const netProfit = totalRevenue - totalExpenses;
   const activeOrdersCount = allOrders.filter((o) => !["COMPLETED", "CANCELLED"].includes(o.status)).length;
 
   return (
@@ -108,7 +117,7 @@ export default async function DashboardPage() {
             </div>
           </div>
           <p className="mt-3 text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">Revenue minus total costs</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">{marginPercent}% margin (after COGS & expenses)</p>
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { canManageFinance, canManagePartnerTransactions, canManageUsers } from "@/lib/permissions";
 import {
   customerSchema,
   leadSchema,
@@ -36,19 +37,48 @@ function formatError(err: unknown, defaultMessage: string): { success: false; er
 }
 
 // Generate unique sequential order number ORD-2026-XXXX
-async function generateOrderNumber(): Promise<string> {
+async function generateOrderNumber(offset = 0): Promise<string> {
   const year = new Date().getFullYear();
   const count = await prisma.order.count();
-  const sequence = String(count + 1).padStart(4, "0");
+  const sequence = String(count + 1 + offset).padStart(4, "0");
   return `ORD-${year}-${sequence}`;
 }
 
 // Generate unique sequential lead number LEAD-2026-XXXX
-async function generateLeadNumber(): Promise<string> {
+async function generateLeadNumber(offset = 0): Promise<string> {
   const year = new Date().getFullYear();
   const count = await prisma.lead.count();
-  const sequence = String(count + 1).padStart(4, "0");
+  const sequence = String(count + 1 + offset).padStart(4, "0");
   return `LEAD-${year}-${sequence}`;
+}
+
+// Helper to resolve unit cost price snapshot for an order item
+async function getItemCostPriceSnapshot(
+  tx: Prisma.TransactionClient,
+  item: { productId?: string | null; bundleId?: string | null }
+): Promise<Prisma.Decimal> {
+  if (item.bundleId) {
+    const bundle = await tx.productBundle.findUnique({
+      where: { id: item.bundleId },
+      include: { bundleItems: { include: { product: true } } },
+    });
+    if (bundle) {
+      const cost = bundle.bundleItems.reduce((sum, bItem) => {
+        const itemCost = Number(bItem.product?.purchaseCost || 0);
+        return sum + bItem.quantity * itemCost;
+      }, 0);
+      return new Decimal(cost);
+    }
+  } else if (item.productId) {
+    const product = await tx.product.findUnique({
+      where: { id: item.productId },
+      select: { purchaseCost: true },
+    });
+    if (product) {
+      return new Decimal(product.purchaseCost);
+    }
+  }
+  return new Decimal(0);
 }
 
 // ================= CUSTOMERS =================
@@ -119,24 +149,39 @@ export async function createLeadAction(formData: unknown) {
   try {
     const user = await requireUser();
     const parsed = leadSchema.parse(formData);
-    const leadNumber = await generateLeadNumber();
 
-    const lead = await prisma.lead.create({
-      data: {
-        leadNumber,
-        customerId: parsed.customerId,
-        source: parsed.source,
-        stage: parsed.stage,
-        eventType: parsed.eventType || null,
-        eventDate: parsed.eventDate ? new Date(parsed.eventDate) : null,
-        estimatedQuantity: parsed.estimatedQuantity || null,
-        estimatedBudget: parsed.estimatedBudget ? new Decimal(parsed.estimatedBudget) : null,
-        quoteAmount: parsed.quoteAmount ? new Decimal(parsed.quoteAmount) : null,
-        assignedPartnerId: parsed.assignedPartnerId || null,
-        requirements: parsed.requirements || null,
-        notes: parsed.notes || null,
-      },
-    });
+    let attempt = 0;
+    let lead;
+    while (attempt < 3) {
+      try {
+        const leadNumber = await generateLeadNumber(attempt);
+        lead = await prisma.lead.create({
+          data: {
+            leadNumber,
+            customerId: parsed.customerId,
+            source: parsed.source,
+            stage: parsed.stage,
+            eventType: parsed.eventType || null,
+            eventDate: parsed.eventDate ? new Date(parsed.eventDate) : null,
+            estimatedQuantity: parsed.estimatedQuantity || null,
+            estimatedBudget: parsed.estimatedBudget ? new Decimal(parsed.estimatedBudget) : null,
+            quoteAmount: parsed.quoteAmount ? new Decimal(parsed.quoteAmount) : null,
+            assignedPartnerId: parsed.assignedPartnerId || null,
+            requirements: parsed.requirements || null,
+            notes: parsed.notes || null,
+          },
+        });
+        break;
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && attempt < 2) {
+          attempt++;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!lead) throw new Error("Failed to generate unique lead number.");
 
     await logAudit({
       actorId: user.id,
@@ -232,58 +277,84 @@ export async function convertLeadToOrderAction(formData: unknown) {
       return { success: false, error: "Lead not found" };
     }
 
-    const orderNumber = await generateOrderNumber();
-
     const subtotal = parsed.items.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
       0
     );
 
-    const order = await prisma.$transaction(async (tx) => {
-      const newOrder = await tx.order.create({
-        data: {
-          orderNumber,
-          customerId: lead.customerId,
-          source: lead.source,
-          assignedPartnerId: parsed.assignedPartnerId || lead.assignedPartnerId || null,
-          eventType: lead.eventType,
-          eventDate: lead.eventDate,
-          deliveryDate: parsed.deliveryDate ? new Date(parsed.deliveryDate) : null,
-          status: "NEW",
-          subtotal: new Decimal(subtotal),
-          discount: new Decimal(0),
-          total: new Decimal(subtotal),
-          deliveryAddress: parsed.deliveryAddress || null,
-          notes: parsed.notes || lead.notes || null,
-          items: {
-            create: parsed.items.map((item) => ({
-              description: item.description,
-              quantity: item.quantity,
-              unitPrice: new Decimal(item.unitPrice),
-              customizationDetails: item.customizationDetails || null,
-            })),
-          },
-        },
-      });
+    let attempt = 0;
+    let order;
 
-      await tx.lead.update({
-        where: { id: lead.id },
-        data: {
-          stage: "WON",
-          convertedOrderId: newOrder.id,
-        },
-      });
+    while (attempt < 3) {
+      try {
+        const orderNumber = await generateOrderNumber(attempt);
 
-      return newOrder;
-    });
+        order = await prisma.$transaction(async (tx) => {
+          const itemsWithCost = await Promise.all(
+            parsed.items.map(async (item) => {
+              const costPriceSnapshot = new Decimal(0);
+              return {
+                description: item.description,
+                quantity: item.quantity,
+                unitPrice: new Decimal(item.unitPrice),
+                costPriceSnapshot,
+                customizationDetails: item.customizationDetails || null,
+              };
+            })
+          );
 
-    await logAudit({
-      actorId: user.id,
-      action: "CONVERT_LEAD_TO_ORDER",
-      entityType: "Order",
-      entityId: order.id,
-      metadata: { leadNumber: lead.leadNumber, orderNumber: order.orderNumber },
-    });
+          const newOrder = await tx.order.create({
+            data: {
+              orderNumber,
+              customerId: lead.customerId,
+              source: lead.source,
+              assignedPartnerId: parsed.assignedPartnerId || lead.assignedPartnerId || null,
+              eventType: lead.eventType,
+              eventDate: lead.eventDate,
+              deliveryDate: parsed.deliveryDate ? new Date(parsed.deliveryDate) : null,
+              status: "NEW",
+              subtotal: new Decimal(subtotal),
+              discount: new Decimal(0),
+              total: new Decimal(subtotal),
+              deliveryAddress: parsed.deliveryAddress || null,
+              notes: parsed.notes || lead.notes || null,
+              items: {
+                create: itemsWithCost,
+              },
+            },
+          });
+
+          await tx.lead.update({
+            where: { id: lead.id },
+            data: {
+              stage: "WON",
+              convertedOrderId: newOrder.id,
+            },
+          });
+
+          await logAudit({
+            actorId: user.id,
+            action: "CONVERT_LEAD_TO_ORDER",
+            entityType: "Order",
+            entityId: newOrder.id,
+            metadata: { leadNumber: lead.leadNumber, orderNumber: newOrder.orderNumber },
+            tx,
+          });
+
+          return newOrder;
+        });
+
+        break;
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && attempt < 2) {
+          attempt++;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!order) throw new Error("Failed to convert lead to order.");
 
     revalidatePath("/leads");
     revalidatePath("/orders");
@@ -306,11 +377,143 @@ const FULFILLMENT_STATUSES = [
   "COMPLETED",
 ];
 
+/**
+ * Idempotent stock fulfillment synchronizer for orders.
+ * Guarantees that stock is deducted EXACTLY ONCE per fulfilled order lifecycle,
+ * and restored EXACTLY ONCE if the order is cancelled / moved to non-fulfilled status.
+ */
+async function syncOrderStockFulfillment(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  targetStatus: string,
+  userId: string
+) {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: {
+        include: {
+          product: true,
+          bundle: {
+            include: {
+              bundleItems: {
+                include: { product: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!order) return;
+
+  const isTargetFulfilled = FULFILLMENT_STATUSES.includes(targetStatus);
+
+  // Case 1: Order is moving to a fulfilled status and stock HAS NOT been deducted yet
+  if (isTargetFulfilled && !order.stockDeducted) {
+    for (const item of order.items) {
+      if (item.bundleId && item.bundle) {
+        for (const bItem of item.bundle.bundleItems) {
+          const requiredQty = bItem.quantity * item.quantity;
+          if (bItem.product.currentStock < requiredQty) {
+            throw new Error(
+              `Insufficient stock for component product "${bItem.product.name}" in combo "${item.bundle.name}". Required: ${requiredQty}, Available: ${bItem.product.currentStock}`
+            );
+          }
+          await tx.product.update({
+            where: { id: bItem.productId },
+            data: { currentStock: { decrement: requiredQty } },
+          });
+          await tx.stockMovement.create({
+            data: {
+              productId: bItem.productId,
+              orderId: order.id,
+              type: "SALE_CONSUMPTION",
+              quantity: requiredQty,
+              reference: `Order ${order.orderNumber} (Combo: ${item.bundle.name} x${item.quantity}) - Status: ${targetStatus}`,
+              createdById: userId,
+            },
+          });
+        }
+      } else if (item.productId && item.product) {
+        if (item.product.currentStock < item.quantity) {
+          throw new Error(
+            `Insufficient stock for product "${item.product.name}". Required: ${item.quantity}, Available: ${item.product.currentStock}`
+          );
+        }
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: { decrement: item.quantity } },
+        });
+        await tx.stockMovement.create({
+          data: {
+            productId: item.productId,
+            orderId: order.id,
+            type: "SALE_CONSUMPTION",
+            quantity: item.quantity,
+            reference: `Order ${order.orderNumber} - Status: ${targetStatus}`,
+            createdById: userId,
+          },
+        });
+      }
+    }
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: { stockDeducted: true },
+    });
+  }
+  // Case 2: Order is moving to a non-fulfilled status (e.g. CANCELLED) and stock HAS been deducted
+  else if (!isTargetFulfilled && order.stockDeducted) {
+    for (const item of order.items) {
+      if (item.bundleId && item.bundle) {
+        for (const bItem of item.bundle.bundleItems) {
+          const qtyToRestore = bItem.quantity * item.quantity;
+          await tx.product.update({
+            where: { id: bItem.productId },
+            data: { currentStock: { increment: qtyToRestore } },
+          });
+          await tx.stockMovement.create({
+            data: {
+              productId: bItem.productId,
+              orderId: order.id,
+              type: "RETURN",
+              quantity: qtyToRestore,
+              reference: `Order ${order.orderNumber} returned to inventory (Combo: ${item.bundle.name} x${item.quantity}) - Status: ${targetStatus}`,
+              createdById: userId,
+            },
+          });
+        }
+      } else if (item.productId && item.product) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: { increment: item.quantity } },
+        });
+        await tx.stockMovement.create({
+          data: {
+            productId: item.productId,
+            orderId: order.id,
+            type: "RETURN",
+            quantity: item.quantity,
+            reference: `Order ${order.orderNumber} returned to inventory - Status: ${targetStatus}`,
+            createdById: userId,
+          },
+        });
+      }
+    }
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: { stockDeducted: false },
+    });
+  }
+}
+
 export async function createOrderAction(formData: unknown) {
   try {
     const user = await requireUser();
     const parsed = orderSchema.parse(formData);
-    const orderNumber = await generateOrderNumber();
 
     const subtotal = parsed.items.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
@@ -319,104 +522,76 @@ export async function createOrderAction(formData: unknown) {
     const total = Math.max(0, subtotal - (parsed.discount || 0));
 
     const orderStatus = parsed.status || "NEW";
-    const isFulfilled = FULFILLMENT_STATUSES.includes(orderStatus);
 
-    const order = await prisma.$transaction(async (tx) => {
-      // Stock verification and deduction if order is created in an active fulfillment status
-      if (isFulfilled) {
-        for (const item of parsed.items) {
-          if (item.bundleId) {
-            const bundle = await tx.productBundle.findUnique({
-              where: { id: item.bundleId },
-              include: { bundleItems: { include: { product: true } } },
-            });
-            if (bundle) {
-              for (const bItem of bundle.bundleItems) {
-                const requiredQty = bItem.quantity * item.quantity;
-                if (bItem.product.currentStock < requiredQty) {
-                  throw new Error(
-                    `Insufficient stock for component product "${bItem.product.name}" in combo "${bundle.name}". Required: ${requiredQty}, Available: ${bItem.product.currentStock}`
-                  );
-                }
-                await tx.product.update({
-                  where: { id: bItem.productId },
-                  data: { currentStock: { decrement: requiredQty } },
-                });
-                await tx.stockMovement.create({
-                  data: {
-                    productId: bItem.productId,
-                    type: "SALE_CONSUMPTION",
-                    quantity: requiredQty,
-                    reference: `Order ${orderNumber} (Combo: ${bundle.name} x${item.quantity}) - Status: ${orderStatus}`,
-                    createdById: user.id,
-                  },
-                });
-              }
-            }
-          } else if (item.productId) {
-            const product = await tx.product.findUnique({
-              where: { id: item.productId },
-            });
-            if (product) {
-              if (product.currentStock < item.quantity) {
-                throw new Error(
-                  `Insufficient stock for product "${product.name}". Required: ${item.quantity}, Available: ${product.currentStock}`
-                );
-              }
-              await tx.product.update({
-                where: { id: item.productId },
-                data: { currentStock: { decrement: item.quantity } },
-              });
-              await tx.stockMovement.create({
-                data: {
-                  productId: item.productId,
-                  type: "SALE_CONSUMPTION",
-                  quantity: item.quantity,
-                  reference: `Order ${orderNumber} - Status: ${orderStatus}`,
-                  createdById: user.id,
-                },
-              });
-            }
-          }
+    let attempt = 0;
+    let order;
+
+    while (attempt < 3) {
+      try {
+        const orderNumber = await generateOrderNumber(attempt);
+
+        order = await prisma.$transaction(async (tx) => {
+          const itemsWithCost = await Promise.all(
+            parsed.items.map(async (item) => {
+              const costPriceSnapshot = await getItemCostPriceSnapshot(tx, item);
+              return {
+                productId: item.productId || null,
+                bundleId: item.bundleId || null,
+                description: item.description,
+                quantity: item.quantity,
+                unitPrice: new Decimal(item.unitPrice),
+                costPriceSnapshot,
+                customizationDetails: item.customizationDetails || null,
+              };
+            })
+          );
+
+          const createdOrder = await tx.order.create({
+            data: {
+              orderNumber,
+              customerId: parsed.customerId,
+              source: parsed.source,
+              assignedPartnerId: parsed.assignedPartnerId || null,
+              eventType: parsed.eventType || null,
+              eventDate: parsed.eventDate ? new Date(parsed.eventDate) : null,
+              deliveryDate: parsed.deliveryDate ? new Date(parsed.deliveryDate) : null,
+              status: orderStatus,
+              subtotal: new Decimal(subtotal),
+              discount: new Decimal(parsed.discount || 0),
+              total: new Decimal(total),
+              deliveryAddress: parsed.deliveryAddress || null,
+              notes: parsed.notes || null,
+              items: {
+                create: itemsWithCost,
+              },
+            },
+          });
+
+          await syncOrderStockFulfillment(tx, createdOrder.id, orderStatus, user.id);
+
+          await logAudit({
+            actorId: user.id,
+            action: "CREATE_ORDER",
+            entityType: "Order",
+            entityId: createdOrder.id,
+            metadata: { orderNumber: createdOrder.orderNumber, total, status: createdOrder.status },
+            tx,
+          });
+
+          return createdOrder;
+        });
+
+        break;
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && attempt < 2) {
+          attempt++;
+          continue;
         }
+        throw err;
       }
+    }
 
-      return tx.order.create({
-        data: {
-          orderNumber,
-          customerId: parsed.customerId,
-          source: parsed.source,
-          assignedPartnerId: parsed.assignedPartnerId || null,
-          eventType: parsed.eventType || null,
-          eventDate: parsed.eventDate ? new Date(parsed.eventDate) : null,
-          deliveryDate: parsed.deliveryDate ? new Date(parsed.deliveryDate) : null,
-          status: orderStatus,
-          subtotal: new Decimal(subtotal),
-          discount: new Decimal(parsed.discount || 0),
-          total: new Decimal(total),
-          deliveryAddress: parsed.deliveryAddress || null,
-          notes: parsed.notes || null,
-          items: {
-            create: parsed.items.map((item) => ({
-              productId: item.productId || null,
-              bundleId: item.bundleId || null,
-              description: item.description,
-              quantity: item.quantity,
-              unitPrice: new Decimal(item.unitPrice),
-              customizationDetails: item.customizationDetails || null,
-            })),
-          },
-        },
-      });
-    });
-
-    await logAudit({
-      actorId: user.id,
-      action: "CREATE_ORDER",
-      entityType: "Order",
-      entityId: order.id,
-      metadata: { orderNumber: order.orderNumber, total, status: order.status },
-    });
+    if (!order) throw new Error("Failed to create order.");
 
     revalidatePath("/orders");
     revalidatePath("/inventory");
@@ -439,10 +614,61 @@ export async function updateOrderAction(id: string, formData: unknown) {
     const total = Math.max(0, subtotal - (parsed.discount || 0));
 
     const order = await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.order.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: {
+              product: true,
+              bundle: { include: { bundleItems: { include: { product: true } } } },
+            },
+          },
+        },
+      });
+
+      if (existingOrder && existingOrder.stockDeducted) {
+        // Temporarily revert stock for existing items before re-creating
+        for (const item of existingOrder.items) {
+          if (item.bundleId && item.bundle) {
+            for (const bItem of item.bundle.bundleItems) {
+              const qtyToRestore = bItem.quantity * item.quantity;
+              await tx.product.update({
+                where: { id: bItem.productId },
+                data: { currentStock: { increment: qtyToRestore } },
+              });
+            }
+          } else if (item.productId && item.product) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { currentStock: { increment: item.quantity } },
+            });
+          }
+        }
+        await tx.order.update({
+          where: { id },
+          data: { stockDeducted: false },
+        });
+      }
+
       // Clear existing order items and recreate
       await tx.orderItem.deleteMany({ where: { orderId: id } });
 
-      return tx.order.update({
+      const itemsWithCost = await Promise.all(
+        parsed.items.map(async (item) => {
+          const costPriceSnapshot = await getItemCostPriceSnapshot(tx, item);
+          return {
+            productId: item.productId || null,
+            bundleId: item.bundleId || null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: new Decimal(item.unitPrice),
+            costPriceSnapshot,
+            customizationDetails: item.customizationDetails || null,
+          };
+        })
+      );
+
+      const updatedOrder = await tx.order.update({
         where: { id },
         data: {
           customerId: parsed.customerId,
@@ -458,25 +684,23 @@ export async function updateOrderAction(id: string, formData: unknown) {
           deliveryAddress: parsed.deliveryAddress || null,
           notes: parsed.notes || null,
           items: {
-            create: parsed.items.map((item) => ({
-              productId: item.productId || null,
-              bundleId: item.bundleId || null,
-              description: item.description,
-              quantity: item.quantity,
-              unitPrice: new Decimal(item.unitPrice),
-              customizationDetails: item.customizationDetails || null,
-            })),
+            create: itemsWithCost,
           },
         },
       });
-    });
 
-    await logAudit({
-      actorId: user.id,
-      action: "UPDATE_ORDER",
-      entityType: "Order",
-      entityId: order.id,
-      metadata: { orderNumber: order.orderNumber, total },
+      await syncOrderStockFulfillment(tx, updatedOrder.id, updatedOrder.status, user.id);
+
+      await logAudit({
+        actorId: user.id,
+        action: "UPDATE_ORDER",
+        entityType: "Order",
+        entityId: updatedOrder.id,
+        metadata: { orderNumber: updatedOrder.orderNumber, total },
+        tx,
+      });
+
+      return updatedOrder;
     });
 
     revalidatePath("/orders");
@@ -495,127 +719,34 @@ export async function updateOrderStatusAction(formData: unknown) {
 
     const existingOrder = await prisma.order.findUnique({
       where: { id: parsed.orderId },
-      include: {
-        items: {
-          include: {
-            product: true,
-            bundle: {
-              include: {
-                bundleItems: {
-                  include: { product: true },
-                },
-              },
-            },
-          },
-        },
-      },
     });
 
     if (!existingOrder) {
       return { success: false, error: "Order not found." };
     }
 
-    const wasFulfilled = FULFILLMENT_STATUSES.includes(existingOrder.status);
-    const isNowFulfilled = FULFILLMENT_STATUSES.includes(parsed.status);
+    if (parsed.status === existingOrder.status) {
+      return { success: true as const, order: serializeData(existingOrder) };
+    }
 
     const updatedOrder = await prisma.$transaction(async (tx) => {
-      // Transition from non-fulfilled state (e.g. NEW/QUOTED) to active fulfillment state (e.g. PRODUCTION/DELIVERED/COMPLETED)
-      if (!wasFulfilled && isNowFulfilled) {
-        for (const item of existingOrder.items) {
-          if (item.bundleId && item.bundle) {
-            for (const bItem of item.bundle.bundleItems) {
-              const requiredQty = bItem.quantity * item.quantity;
-              if (bItem.product.currentStock < requiredQty) {
-                throw new Error(
-                  `Insufficient stock for component product "${bItem.product.name}" in combo "${item.bundle.name}". Required: ${requiredQty}, Available: ${bItem.product.currentStock}`
-                );
-              }
-              await tx.product.update({
-                where: { id: bItem.productId },
-                data: { currentStock: { decrement: requiredQty } },
-              });
-              await tx.stockMovement.create({
-                data: {
-                  productId: bItem.productId,
-                  type: "SALE_CONSUMPTION",
-                  quantity: requiredQty,
-                  reference: `Order ${existingOrder.orderNumber} (Combo: ${item.bundle.name} x${item.quantity}) - Status: ${parsed.status}`,
-                  createdById: user.id,
-                },
-              });
-            }
-          } else if (item.productId && item.product) {
-            if (item.product.currentStock < item.quantity) {
-              throw new Error(
-                `Insufficient stock for product "${item.product.name}". Required: ${item.quantity}, Available: ${item.product.currentStock}`
-              );
-            }
-            await tx.product.update({
-              where: { id: item.productId },
-              data: { currentStock: { decrement: item.quantity } },
-            });
-            await tx.stockMovement.create({
-              data: {
-                productId: item.productId,
-                type: "SALE_CONSUMPTION",
-                quantity: item.quantity,
-                reference: `Order ${existingOrder.orderNumber} - Status: ${parsed.status}`,
-                createdById: user.id,
-              },
-            });
-          }
-        }
-      }
-      // Transition to CANCELLED from fulfilled state -> restore stock
-      else if (wasFulfilled && parsed.status === "CANCELLED") {
-        for (const item of existingOrder.items) {
-          if (item.bundleId && item.bundle) {
-            for (const bItem of item.bundle.bundleItems) {
-              const qtyToRestore = bItem.quantity * item.quantity;
-              await tx.product.update({
-                where: { id: bItem.productId },
-                data: { currentStock: { increment: qtyToRestore } },
-              });
-              await tx.stockMovement.create({
-                data: {
-                  productId: bItem.productId,
-                  type: "RETURN",
-                  quantity: qtyToRestore,
-                  reference: `Order ${existingOrder.orderNumber} Cancelled (Combo: ${item.bundle.name} x${item.quantity})`,
-                  createdById: user.id,
-                },
-              });
-            }
-          } else if (item.productId && item.product) {
-            await tx.product.update({
-              where: { id: item.productId },
-              data: { currentStock: { increment: item.quantity } },
-            });
-            await tx.stockMovement.create({
-              data: {
-                productId: item.productId,
-                type: "RETURN",
-                quantity: item.quantity,
-                reference: `Order ${existingOrder.orderNumber} Cancelled`,
-                createdById: user.id,
-              },
-            });
-          }
-        }
-      }
-
-      return tx.order.update({
+      const resOrder = await tx.order.update({
         where: { id: parsed.orderId },
         data: { status: parsed.status },
       });
-    });
 
-    await logAudit({
-      actorId: user.id,
-      action: "UPDATE_ORDER_STATUS",
-      entityType: "Order",
-      entityId: updatedOrder.id,
-      metadata: { status: parsed.status, previousStatus: existingOrder.status },
+      await syncOrderStockFulfillment(tx, resOrder.id, parsed.status, user.id);
+
+      await logAudit({
+        actorId: user.id,
+        action: "UPDATE_ORDER_STATUS",
+        entityType: "Order",
+        entityId: resOrder.id,
+        metadata: { status: parsed.status, previousStatus: existingOrder.status },
+        tx,
+      });
+
+      return resOrder;
     });
 
     revalidatePath("/orders");
@@ -649,22 +780,29 @@ export async function createPaymentAction(formData: unknown) {
       });
 
       const order = await tx.order.findUnique({ where: { id: parsed.orderId } });
+      let updatedStatus = order?.status;
       if (order && parsed.type === "ADVANCE" && ["NEW", "QUOTED", "CONFIRMED"].includes(order.status)) {
+        updatedStatus = "ADVANCE_PAID";
         await tx.order.update({
           where: { id: order.id },
           data: { status: "ADVANCE_PAID" },
         });
       }
 
-      return newPayment;
-    });
+      if (order && updatedStatus) {
+        await syncOrderStockFulfillment(tx, order.id, updatedStatus, user.id);
+      }
 
-    await logAudit({
-      actorId: user.id,
-      action: "RECORD_PAYMENT",
-      entityType: "Payment",
-      entityId: payment.id,
-      metadata: { amount: parsed.amount, orderId: parsed.orderId },
+      await logAudit({
+        actorId: user.id,
+        action: "RECORD_PAYMENT",
+        entityType: "Payment",
+        entityId: newPayment.id,
+        metadata: { amount: parsed.amount, orderId: parsed.orderId },
+        tx,
+      });
+
+      return newPayment;
     });
 
     revalidatePath("/orders");
@@ -715,6 +853,9 @@ export async function updatePaymentAction(id: string, formData: unknown) {
 export async function createExpenseAction(formData: unknown) {
   try {
     const user = await requireUser();
+    if (!canManageFinance(user)) {
+      return { success: false, error: "Not authorized." };
+    }
     const parsed = expenseSchema.parse(formData);
 
     const expense = await prisma.expense.create({
@@ -750,6 +891,9 @@ export async function createExpenseAction(formData: unknown) {
 export async function updateExpenseAction(id: string, formData: unknown) {
   try {
     const user = await requireUser();
+    if (!canManageFinance(user)) {
+      return { success: false, error: "Not authorized." };
+    }
     const parsed = expenseSchema.parse(formData);
 
     const expense = await prisma.expense.update({
@@ -786,6 +930,9 @@ export async function updateExpenseAction(id: string, formData: unknown) {
 export async function createPartnerTransactionAction(formData: unknown) {
   try {
     const user = await requireUser();
+    if (!canManagePartnerTransactions(user)) {
+      return { success: false, error: "Not authorized." };
+    }
     const parsed = partnerTransactionSchema.parse(formData);
 
     const transaction = await prisma.partnerTransaction.create({
@@ -819,6 +966,9 @@ export async function createPartnerTransactionAction(formData: unknown) {
 export async function updatePartnerTransactionAction(id: string, formData: unknown) {
   try {
     const user = await requireUser();
+    if (!canManagePartnerTransactions(user)) {
+      return { success: false, error: "Not authorized." };
+    }
     const parsed = partnerTransactionSchema.parse(formData);
 
     const transaction = await prisma.partnerTransaction.update({
@@ -853,6 +1003,9 @@ export async function updatePartnerTransactionAction(id: string, formData: unkno
 export async function toggleUserActiveAction(id: string, isActive: boolean) {
   try {
     const user = await requireUser();
+    if (!canManageUsers(user)) {
+      return { success: false, error: "Not authorized." };
+    }
 
     const updatedUser = await prisma.user.update({
       where: { id },
@@ -877,6 +1030,9 @@ export async function toggleUserActiveAction(id: string, isActive: boolean) {
 export async function createPartnerUserAction(formData: { name: string; email: string }) {
   try {
     const user = await requireUser();
+    if (!canManageUsers(user)) {
+      return { success: false, error: "Not authorized." };
+    }
     const name = formData.name.trim();
     const email = formData.email.trim().toLowerCase();
 
@@ -927,6 +1083,7 @@ export async function createSupplierAction(formData: unknown) {
         email: parsed.email || null,
         address: parsed.address || null,
         notes: parsed.notes || null,
+        type: parsed.type,
       },
     });
 
@@ -935,7 +1092,7 @@ export async function createSupplierAction(formData: unknown) {
       action: "CREATE_SUPPLIER",
       entityType: "Supplier",
       entityId: supplier.id,
-      metadata: { name: supplier.name, phone: supplier.phone },
+      metadata: { name: supplier.name, phone: supplier.phone, type: supplier.type },
     });
 
     revalidatePath("/inventory");
@@ -959,6 +1116,7 @@ export async function updateSupplierAction(id: string, formData: unknown) {
         email: parsed.email || null,
         address: parsed.address || null,
         notes: parsed.notes || null,
+        type: parsed.type,
       },
     });
 
@@ -967,6 +1125,7 @@ export async function updateSupplierAction(id: string, formData: unknown) {
       action: "UPDATE_SUPPLIER",
       entityType: "Supplier",
       entityId: supplier.id,
+      metadata: { type: supplier.type },
     });
 
     revalidatePath("/inventory");
@@ -1072,15 +1231,16 @@ export async function recordStockMovementAction(formData: unknown) {
         },
       });
 
-      return movement;
-    });
+      await logAudit({
+        actorId: user.id,
+        action: "RECORD_STOCK_MOVEMENT",
+        entityType: "StockMovement",
+        entityId: movement.id,
+        metadata: { productId: parsed.productId, type: parsed.type, quantity: parsed.quantity },
+        tx,
+      });
 
-    await logAudit({
-      actorId: user.id,
-      action: "RECORD_STOCK_MOVEMENT",
-      entityType: "StockMovement",
-      entityId: result.id,
-      metadata: { productId: parsed.productId, type: parsed.type, quantity: parsed.quantity },
+      return movement;
     });
 
     revalidatePath("/inventory");
@@ -1098,7 +1258,7 @@ export async function createProductBundleAction(formData: unknown) {
     const parsed = bundleSchema.parse(formData);
 
     const bundle = await prisma.$transaction(async (tx) => {
-      return tx.productBundle.create({
+      const newBundle = await tx.productBundle.create({
         data: {
           name: parsed.name,
           sku: parsed.sku.toUpperCase(),
@@ -1119,14 +1279,17 @@ export async function createProductBundleAction(formData: unknown) {
           },
         },
       });
-    });
 
-    await logAudit({
-      actorId: user.id,
-      action: "CREATE_PRODUCT_BUNDLE",
-      entityType: "ProductBundle",
-      entityId: bundle.id,
-      metadata: { name: bundle.name, sku: bundle.sku },
+      await logAudit({
+        actorId: user.id,
+        action: "CREATE_PRODUCT_BUNDLE",
+        entityType: "ProductBundle",
+        entityId: newBundle.id,
+        metadata: { name: newBundle.name, sku: newBundle.sku },
+        tx,
+      });
+
+      return newBundle;
     });
 
     revalidatePath("/inventory");
@@ -1145,7 +1308,7 @@ export async function updateProductBundleAction(id: string, formData: unknown) {
     const bundle = await prisma.$transaction(async (tx) => {
       await tx.bundleItem.deleteMany({ where: { bundleId: id } });
 
-      return tx.productBundle.update({
+      const updatedBundle = await tx.productBundle.update({
         where: { id },
         data: {
           name: parsed.name,
@@ -1167,14 +1330,17 @@ export async function updateProductBundleAction(id: string, formData: unknown) {
           },
         },
       });
-    });
 
-    await logAudit({
-      actorId: user.id,
-      action: "UPDATE_PRODUCT_BUNDLE",
-      entityType: "ProductBundle",
-      entityId: bundle.id,
-      metadata: { name: bundle.name, sku: bundle.sku },
+      await logAudit({
+        actorId: user.id,
+        action: "UPDATE_PRODUCT_BUNDLE",
+        entityType: "ProductBundle",
+        entityId: updatedBundle.id,
+        metadata: { name: updatedBundle.name, sku: updatedBundle.sku },
+        tx,
+      });
+
+      return updatedBundle;
     });
 
     revalidatePath("/inventory");
