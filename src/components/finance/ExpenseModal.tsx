@@ -118,6 +118,7 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
   const [selectedCategory, setSelectedCategory] = useState<string>(
     expense?.category || TYPE_CONFIG[initialType]?.defaultCategory || "DELIVERY"
   );
+  const [selectedMethod, setSelectedMethod] = useState<string>(expense?.method || "UPI");
 
   if (!isOpen) return null;
 
@@ -330,7 +331,7 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
                 defaultValue={expense?.paidById || ""}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-xs focus:border-[#3f563f] focus:outline-none"
               >
-                <option value="">Current User</option>
+                <option value="">Current User / All Partners</option>
                 {partners.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -347,12 +348,14 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
               <select
                 name="method"
                 required
-                defaultValue={expense?.method || "UPI"}
+                value={selectedMethod}
+                onChange={(e) => setSelectedMethod(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-xs focus:border-[#3f563f] focus:outline-none"
               >
                 <option value="UPI">UPI</option>
                 <option value="BANK_TRANSFER">Bank Transfer</option>
                 <option value="CASH">Cash</option>
+                <option value="PARTNER_CAPITAL">🏛️ Partner Capital Fund</option>
                 <option value="OTHER">Other</option>
               </select>
             </div>
@@ -367,6 +370,13 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
               />
             </div>
           </div>
+
+          {selectedMethod === "PARTNER_CAPITAL" && (
+            <div className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-900 border border-amber-200 font-medium flex items-center gap-2">
+              <Info className="size-4 text-amber-800 shrink-0" />
+              <span>🏛️ <strong>Partner Capital Fund</strong>: This expense will be deducted directly from the partner capital balance.</span>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-2 border-t border-[#edf1e8]">
             <button

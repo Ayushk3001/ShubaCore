@@ -1,20 +1,50 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Users, Wallet, ArrowUpRight, ArrowDownRight, Shield, UserPlus, Edit } from "lucide-react";
+import { Plus, Users, Wallet, ArrowUpRight, ArrowDownRight, Shield, UserPlus, Edit, Trash2, ArrowUp, ArrowDown, Loader2, Package } from "lucide-react";
 import { PartnerTransactionModal } from "./PartnerTransactionModal";
 import { AddPartnerModal } from "./AddPartnerModal";
+import { calculateProfitMetrics, calculatePartnerBalances } from "@/lib/profit";
+import { removePartnerUserAction } from "@/lib/actions";
 
 export function PartnersClient({
   partners,
   transactions,
+  expenses = [],
+  orders = [],
+  products = [],
 }: {
   partners: Array<any>;
   transactions: Array<any>;
+  expenses?: Array<any>;
+  orders?: Array<any>;
+  products?: Array<any>;
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [isAddPartnerOpen, setIsAddPartnerOpen] = useState(false);
+  const [deactivatingPartnerId, setDeactivatingPartnerId] = useState<string | null>(null);
+
+  const { netProfit, totalRevenue } = calculateProfitMetrics({ orders, expenses, partnerTransactions: transactions, products });
+  const { partnerBalances } = calculatePartnerBalances({ partners, partnerTransactions: transactions, expenses, netProfit, totalRevenue });
+
+  async function handleRemovePartner(id: string, name: string) {
+    if (!confirm(`Are you sure you want to remove ${name} as a partner? Their historical transactions will remain in audit logs, but future profit allocation will only be split among active remaining partners.`)) {
+      return;
+    }
+
+    setDeactivatingPartnerId(id);
+    try {
+      const res = await removePartnerUserAction(id);
+      if (!res.success) {
+        alert(res.error || "Failed to remove partner.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to remove partner.");
+    } finally {
+      setDeactivatingPartnerId(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -22,7 +52,7 @@ export function PartnersClient({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Partners & Equity Ledger</h1>
           <p className="mt-1 text-sm text-[#6b746c]">
-            Track capital investments, reimbursements, withdrawals, and out-of-pocket business expenses for partners.
+            Track capital investments, reimbursements, withdrawals, out-of-pocket business expenses, and real-time withdrawable profit balances.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -49,46 +79,106 @@ export function PartnersClient({
       {/* Partners Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {partners.map((partner) => {
-          const partnerTx = transactions.filter((t) => t.partnerId === partner.id);
-          const investments = partnerTx
-            .filter((t) => t.type === "INITIAL_INVESTMENT" || t.type === "ADDITIONAL_INVESTMENT" || t.type === "EXPENSE_PAID")
-            .reduce((s, t) => s + Number(t.amount), 0);
-          const withdrawals = partnerTx
-            .filter((t) => t.type === "WITHDRAWAL" || t.type === "REIMBURSEMENT")
-            .reduce((s, t) => s + Number(t.amount), 0);
-          const netCapital = investments - withdrawals;
+          const detail = partnerBalances.find((b) => b.id === partner.id);
+          const investments = detail ? detail.directInvestments + detail.outOfPocketExpenses : 0;
+          const withdrawals = detail ? detail.totalWithdrawn : 0;
+          const allocatedProfit = detail ? detail.allocatedProfit : 0;
+          const withdrawableAmount = detail ? detail.withdrawableAmount : 0;
+          const liquidCashWithdrawable = detail ? detail.liquidCashWithdrawable : 0;
+          const tiedUpInStock = detail ? detail.tiedUpInStock : 0;
+          const payableAmount = detail ? detail.payableAmount : 0;
+          const status = detail ? detail.status : "SETTLED";
+          const isActive = partner.isActive !== false;
 
           return (
-            <div key={partner.id} className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4">
+            <div
+              key={partner.id}
+              className={`rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4 ${
+                !isActive ? "opacity-60 bg-slate-50" : ""
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex size-10 items-center justify-center rounded-full bg-[#edf1e8] font-bold text-[#3f563f]">
                     {partner.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="font-bold text-[#20231f]">{partner.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-[#20231f]">{partner.name}</p>
+                      {!isActive && (
+                        <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                          Past Partner
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-[#6b746c]">{partner.email}</p>
                   </div>
                 </div>
-                <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-900">
-                  {partner.role}
-                </span>
+
+                {isActive && (
+                  <button
+                    title="Remove Partner"
+                    onClick={() => handleRemovePartner(partner.id, partner.name)}
+                    disabled={deactivatingPartnerId === partner.id}
+                    className="inline-flex items-center gap-1 rounded-md p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    {deactivatingPartnerId === partner.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                  </button>
+                )}
               </div>
 
               <div className="border-t border-[#edf1e8] pt-3 grid grid-cols-2 gap-2 text-xs">
                 <div>
-                  <span className="text-[#8a948b]">Invested / Paid</span>
+                  <span className="text-[#8a948b]">Invested in Stock</span>
                   <p className="font-bold text-emerald-900 mt-0.5">₹{investments.toLocaleString()}</p>
                 </div>
                 <div>
-                  <span className="text-[#8a948b]">Reimbursed / Drawn</span>
+                  <span className="text-[#8a948b]">Drawn / Reimbursed</span>
                   <p className="font-bold text-rose-800 mt-0.5">₹{withdrawals.toLocaleString()}</p>
                 </div>
               </div>
 
+              <div className="border-t border-[#edf1e8] pt-2 text-xs flex justify-between items-center">
+                <span className="text-[#6b746c]">Allocated Profit Share</span>
+                <span className="font-semibold text-blue-900">₹{Math.round(allocatedProfit).toLocaleString()}</span>
+              </div>
+
+              {/* Settlement Balance Status Card */}
               <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] flex justify-between items-center text-xs">
-                <span className="font-semibold text-[#4e584f]">Net Capital Account</span>
-                <span className="text-sm font-bold text-[#263326]">₹{netCapital.toLocaleString()}</span>
+                <span className="font-semibold text-[#4e584f]">Settlement Status</span>
+                {status === "LOCKED_IN_STOCK" && (
+                  <span className="inline-flex items-center gap-1 font-bold text-amber-950 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                    <Package className="size-3 text-amber-800" />
+                    ₹{Math.round(tiedUpInStock).toLocaleString()} Tied in Stock (Cash: ₹0)
+                  </span>
+                )}
+                {status === "PARTIALLY_RECOVERED" && (
+                  <span className="inline-flex items-center gap-1 font-bold text-blue-950 bg-blue-100 px-2 py-0.5 rounded border border-blue-300">
+                    <ArrowUp className="size-3" />
+                    Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
+                  </span>
+                )}
+                {status === "WITHDRAWABLE" && (
+                  <span className="inline-flex items-center gap-1 font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                    <ArrowUp className="size-3" />
+                    Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
+                  </span>
+                )}
+                {status === "PAYABLE_TO_COMPANY" && (
+                  <span className="inline-flex items-center gap-1 font-bold text-rose-900 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
+                    <ArrowDown className="size-3" />
+                    Owes Company ₹{Math.round(payableAmount).toLocaleString()}
+                  </span>
+                )}
+                {status === "SETTLED" && (
+                  <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                    Settled ₹0
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -176,3 +266,4 @@ export function PartnersClient({
     </div>
   );
 }
+

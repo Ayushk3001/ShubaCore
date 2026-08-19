@@ -60,6 +60,7 @@ enum PaymentMethod {
   UPI
   BANK_TRANSFER
   CASH
+  PARTNER_CAPITAL
   OTHER
 }
 

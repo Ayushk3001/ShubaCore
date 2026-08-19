@@ -26,7 +26,7 @@ export const OrderStatusEnum = z.enum([
   "CANCELLED",
 ]);
 export const PaymentTypeEnum = z.enum(["ADVANCE", "PARTIAL", "FINAL", "REFUND"]);
-export const PaymentMethodEnum = z.enum(["UPI", "BANK_TRANSFER", "CASH", "OTHER"]);
+export const PaymentMethodEnum = z.enum(["UPI", "BANK_TRANSFER", "CASH", "PARTNER_CAPITAL", "OTHER"]);
 export const ExpenseCategoryEnum = z.enum([
   "MATERIALS",
   "PACKAGING",

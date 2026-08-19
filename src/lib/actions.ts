@@ -1049,6 +1049,7 @@ export async function createPartnerTransactionAction(formData: unknown) {
     });
 
     revalidatePath("/partners");
+    revalidatePath("/finance");
     revalidatePath("/dashboard");
     return { success: true as const, transaction: serializeData(transaction) };
   } catch (err) {
@@ -1084,6 +1085,7 @@ export async function updatePartnerTransactionAction(id: string, formData: unkno
     });
 
     revalidatePath("/partners");
+    revalidatePath("/finance");
     revalidatePath("/dashboard");
     return { success: true as const, transaction: serializeData(transaction) };
   } catch (err) {
@@ -1113,10 +1115,50 @@ export async function toggleUserActiveAction(id: string, isActive: boolean) {
       metadata: { isActive },
     });
 
+    revalidatePath("/partners");
+    revalidatePath("/finance");
     revalidatePath("/settings");
     return { success: true as const, user: updatedUser };
   } catch (err) {
     return formatError(err, "Failed to update user status.");
+  }
+}
+
+export async function removePartnerUserAction(id: string) {
+  try {
+    const user = await requireUser();
+    if (!canManageUsers(user)) {
+      return { success: false, error: "Not authorized." };
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id } });
+    if (!targetUser) {
+      return { success: false, error: "Partner not found." };
+    }
+
+    // Set role to STAFF and active to false so partner is cleanly removed from equity/partner operations
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        isActive: false,
+        role: "STAFF",
+      },
+    });
+
+    await logAudit({
+      actorId: user.id,
+      action: "REMOVE_PARTNER_USER",
+      entityType: "User",
+      entityId: id,
+      metadata: { previousRole: targetUser.role, name: targetUser.name },
+    });
+
+    revalidatePath("/partners");
+    revalidatePath("/finance");
+    revalidatePath("/settings");
+    return { success: true as const, user: updatedUser };
+  } catch (err) {
+    return formatError(err, "Failed to remove partner user.");
   }
 }
 
@@ -1154,6 +1196,7 @@ export async function createPartnerUserAction(formData: { name: string; email: s
     });
 
     revalidatePath("/partners");
+    revalidatePath("/finance");
     revalidatePath("/settings");
     return { success: true as const, partner };
   } catch (err) {

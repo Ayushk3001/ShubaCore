@@ -167,6 +167,7 @@ export function PartnerTransactionModal({ transaction, partners, isOpen, onClose
                 <option value="BANK_TRANSFER">Bank Transfer</option>
                 <option value="UPI">UPI</option>
                 <option value="CASH">Cash</option>
+                <option value="PARTNER_CAPITAL">Partner Capital Fund</option>
                 <option value="OTHER">Other</option>
               </select>
             </div>

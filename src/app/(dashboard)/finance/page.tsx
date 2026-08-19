@@ -31,8 +31,8 @@ export default async function FinancePage() {
       },
     }),
     prisma.user.findMany({
-      where: { role: "PARTNER", isActive: true },
-      select: { id: true, name: true },
+      where: { role: "PARTNER" },
+      select: { id: true, name: true, email: true, role: true, isActive: true },
     }),
     prisma.partnerTransaction.findMany(),
     prisma.product.findMany({

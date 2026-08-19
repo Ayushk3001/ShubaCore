@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart } from "lucide-react";
+import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart, Wallet, ArrowUp, ArrowDown } from "lucide-react";
 import { PaymentModal } from "./PaymentModal";
 import { ExpenseModal } from "./ExpenseModal";
-import { calculateProfitMetrics, calculateOrderGrossProfit } from "@/lib/profit";
+import { PartnerTransactionModal } from "@/components/partners/PartnerTransactionModal";
+import { calculateProfitMetrics, calculateOrderGrossProfit, calculatePartnerBalances } from "@/lib/profit";
 
 export function FinanceClient({
   payments,
@@ -21,11 +22,13 @@ export function FinanceClient({
   partnerTransactions?: Array<any>;
   products?: Array<any>;
 }) {
-  const [activeTab, setActiveTab] = useState<"PAYMENTS" | "EXPENSES" | "PROFITABILITY" | "CAPITAL_RECOVERY">("PAYMENTS");
+  const [activeTab, setActiveTab] = useState<"PAYMENTS" | "EXPENSES" | "PROFITABILITY" | "CAPITAL_RECOVERY" | "PARTNER_SETTLEMENTS">("PAYMENTS");
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [isPartnerTxModalOpen, setIsPartnerTxModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [editingExpense, setEditingExpense] = useState<any>(null);
+  const [partnerTxPreFill, setPartnerTxPreFill] = useState<{ partnerId: string; type: string } | null>(null);
 
   const totalIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
 
@@ -45,13 +48,24 @@ export function FinanceClient({
     capitalRecoveredPercent,
   } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
 
+  const {
+    partnerBalances,
+    totalPartnerContributed,
+    totalPartnerWithdrawn,
+    totalPartnerAllocatedProfit,
+    totalWithdrawableCapital,
+    totalLiquidCashWithdrawable,
+    totalTiedUpInStock,
+    totalPayableToCompany,
+  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Finance & Cashflow</h1>
           <p className="mt-1 text-sm text-[#6b746c]">
-            Asset-backed inventory valuation, OpEx vs CapEx separation, real-time COGS, and capital recovery tracking.
+            Asset-backed inventory valuation, OpEx vs CapEx separation, real-time COGS, partner settlements & withdrawable balance matrix.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -167,6 +181,17 @@ export function FinanceClient({
         >
           Capital Recovery & Assets
         </button>
+        <button
+          onClick={() => setActiveTab("PARTNER_SETTLEMENTS")}
+          className={`rounded-lg px-4 py-2 text-xs font-semibold transition flex items-center gap-1.5 ${
+            activeTab === "PARTNER_SETTLEMENTS"
+              ? "bg-[#263326] text-white shadow-sm"
+              : "bg-white text-[#3f563f] border border-[#3f563f]/30 hover:bg-[#edf1e8]"
+          }`}
+        >
+          <Wallet className="size-3.5" />
+          Partner Profit & Settlements
+        </button>
       </div>
 
       {/* Tab Contents */}
@@ -279,7 +304,10 @@ export function FinanceClient({
                           {e.order ? e.order.orderNumber : "General Overhead"}
                         </td>
                         <td className="px-6 py-4 text-xs text-[#4e584f]">
-                          {e.paidBy?.name || "Company"}
+                          <p className="font-semibold text-[#20231f]">{e.paidBy?.name || "Company"}</p>
+                          <span className="mt-0.5 inline-block rounded bg-[#edf1e8] px-1.5 py-0.5 text-[10px] font-medium text-[#3f563f]">
+                            {e.method === "PARTNER_CAPITAL" ? "🏛️ Partner Capital Fund" : e.method}
+                          </span>
                         </td>
                         <td className="px-6 py-4 text-xs text-[#4e584f]">
                           {new Date(e.expenseDate).toLocaleDateString()}
@@ -410,6 +438,179 @@ export function FinanceClient({
         </div>
       )}
 
+      {activeTab === "PARTNER_SETTLEMENTS" && (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-[#d8ded2] bg-white p-6 shadow-sm space-y-6">
+            <div>
+              <h3 className="text-base font-bold text-[#20231f]">Partner Equity, Profit Distribution & Settlements</h3>
+              <p className="text-xs text-[#6b746c] mt-1">
+                Real-time integration of capital contributions, out-of-pocket business expenses paid by partners, allocated profit shares, and net withdrawable funds vs company receivables.
+              </p>
+            </div>
+
+            {/* KPI Cards for Partner Financials */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                <span className="text-xs font-bold text-blue-900 uppercase">Net Business Profit</span>
+                <p className="mt-2 text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()}</p>
+                <p className="mt-1 text-[11px] text-blue-800">Total distributable profit</p>
+              </div>
+
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
+                <span className="text-xs font-bold text-emerald-900 uppercase">Total Partner Contributions</span>
+                <p className="mt-2 text-2xl font-bold text-emerald-950">₹{totalPartnerContributed.toLocaleString()}</p>
+                <p className="mt-1 text-[11px] text-emerald-800">Capital + Out-of-pocket expenses</p>
+              </div>
+
+              <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-4">
+                <span className="text-xs font-bold text-rose-900 uppercase">Total Withdrawals Made</span>
+                <p className="mt-2 text-2xl font-bold text-rose-950">₹{totalPartnerWithdrawn.toLocaleString()}</p>
+                <p className="mt-1 text-[11px] text-rose-800">Drawn by partners so far</p>
+              </div>
+
+              <div className="rounded-lg border border-[#263326]/20 bg-[#f8faf6] p-4">
+                <span className="text-xs font-bold text-[#263326] uppercase">Max Withdrawable Pool</span>
+                <p className="mt-2 text-2xl font-bold text-[#263326]">₹{totalWithdrawableCapital.toLocaleString()}</p>
+                <p className="mt-1 text-[11px] text-[#6b746c]">Claimable by active partners</p>
+              </div>
+            </div>
+
+            {/* Partner Accounts Table */}
+            <div className="overflow-hidden rounded-xl border border-[#d8ded2] bg-white">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
+                    <tr>
+                      <th className="px-5 py-3.5">Partner Account</th>
+                      <th className="px-5 py-3.5">Capital Invested</th>
+                      <th className="px-5 py-3.5">Out-of-pocket Paid</th>
+                      <th className="px-5 py-3.5">Total Contributed</th>
+                      <th className="px-5 py-3.5">Total Withdrawn</th>
+                      <th className="px-5 py-3.5">Profit Share</th>
+                      <th className="px-5 py-3.5 text-right">Net Settlement Balance</th>
+                      <th className="px-5 py-3.5 text-right">Quick Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#edf1e8]">
+                    {partnerBalances.map((p) => (
+                      <tr key={p.id} className={!p.isActive ? "bg-slate-50 opacity-60" : "hover:bg-[#fbfcf9]"}>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-[#20231f]">{p.name}</span>
+                            {!p.isActive ? (
+                              <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                                Deactivated / Past
+                              </span>
+                            ) : (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900">
+                                Active Partner
+                              </span>
+                            )}
+                          </div>
+                          {p.email && <p className="text-xs text-[#6b746c] mt-0.5">{p.email}</p>}
+                        </td>
+
+                        <td className="px-5 py-4 text-xs font-medium text-[#20231f]">
+                          ₹{p.directInvestments.toLocaleString()}
+                        </td>
+
+                        <td className="px-5 py-4 text-xs font-medium text-[#3f563f]">
+                          ₹{p.outOfPocketExpenses.toLocaleString()}
+                        </td>
+
+                        <td className="px-5 py-4 font-bold text-emerald-900">
+                          ₹{p.totalContributed.toLocaleString()}
+                        </td>
+
+                        <td className="px-5 py-4 font-bold text-rose-800">
+                          ₹{p.totalWithdrawn.toLocaleString()}
+                        </td>
+
+                        <td className="px-5 py-4 text-xs">
+                          <p className="font-semibold text-blue-900">₹{Math.round(p.allocatedProfit).toLocaleString()}</p>
+                          <p className="text-[10px] text-[#6b746c]">({p.profitSharePercent.toFixed(1)}% split)</p>
+                        </td>
+
+                        <td className="px-5 py-4 text-right">
+                          {p.status === "LOCKED_IN_STOCK" && (
+                            <div className="inline-flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-950 border border-amber-300">
+                                <Package className="size-3 text-amber-800" />
+                                ₹{Math.round(p.tiedUpInStock).toLocaleString()} Tied in Stock
+                              </span>
+                              <span className="text-[10px] text-amber-800 mt-0.5">Cash Withdrawable: ₹0</span>
+                            </div>
+                          )}
+                          {p.status === "PARTIALLY_RECOVERED" && (
+                            <div className="inline-flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-950 border border-blue-300">
+                                <ArrowUp className="size-3" />
+                                Can Withdraw ₹{Math.round(p.liquidCashWithdrawable).toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-blue-800 mt-0.5">₹{Math.round(p.tiedUpInStock).toLocaleString()} Tied in Stock</span>
+                            </div>
+                          )}
+                          {p.status === "WITHDRAWABLE" && (
+                            <div className="inline-flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-900 border border-emerald-300">
+                                <ArrowUp className="size-3" />
+                                Can Withdraw ₹{Math.round(p.liquidCashWithdrawable).toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-emerald-700 mt-0.5">Fully recovered payout</span>
+                            </div>
+                          )}
+                          {p.status === "PAYABLE_TO_COMPANY" && (
+                            <div className="inline-flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-900 border border-rose-300">
+                                <ArrowDown className="size-3" />
+                                Owes Company ₹{Math.round(p.payableAmount).toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-rose-700 mt-0.5">Deficit to pay back</span>
+                            </div>
+                          )}
+                          {p.status === "SETTLED" && (
+                            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                              Settled ₹0
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4 text-right">
+                          {p.isActive && (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                title="Record Withdrawal"
+                                onClick={() => {
+                                  setPartnerTxPreFill({ partnerId: p.id, type: "WITHDRAWAL" });
+                                  setIsPartnerTxModalOpen(true);
+                                }}
+                                className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-800 hover:bg-rose-100"
+                              >
+                                Withdraw
+                              </button>
+                              <button
+                                title="Record Capital Contribution"
+                                onClick={() => {
+                                  setPartnerTxPreFill({ partnerId: p.id, type: "ADDITIONAL_INVESTMENT" });
+                                  setIsPartnerTxModalOpen(true);
+                                }}
+                                className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                              >
+                                + Invest
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <PaymentModal
         payment={editingPayment}
         orders={orders}
@@ -430,6 +631,17 @@ export function FinanceClient({
           setEditingExpense(null);
         }}
       />
+
+      <PartnerTransactionModal
+        partners={partners}
+        isOpen={isPartnerTxModalOpen}
+        transaction={partnerTxPreFill ? ({ partnerId: partnerTxPreFill.partnerId, type: partnerTxPreFill.type, amount: 0, description: "", method: "BANK_TRANSFER", occurredAt: new Date() } as any) : null}
+        onClose={() => {
+          setIsPartnerTxModalOpen(false);
+          setPartnerTxPreFill(null);
+        }}
+      />
     </div>
   );
 }
+
