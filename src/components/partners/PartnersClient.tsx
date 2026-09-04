@@ -144,40 +144,59 @@ export function PartnersClient({
 
               <div className="border-t border-[#edf1e8] pt-2 text-xs flex justify-between items-center">
                 <span className="text-[#6b746c]">Allocated Profit Share</span>
-                <span className="font-semibold text-blue-900">₹{Math.round(allocatedProfit).toLocaleString()}</span>
+                <span className="font-semibold text-blue-900">
+                  ₹{Math.round(allocatedProfit).toLocaleString()}{" "}
+                  <span className="text-[10px] text-[#6b746c]">({detail?.profitSharePercent.toFixed(1)}%)</span>
+                </span>
               </div>
 
               {/* Settlement Balance Status Card */}
-              <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] flex justify-between items-center text-xs">
-                <span className="font-semibold text-[#4e584f]">Settlement Status</span>
-                {status === "LOCKED_IN_STOCK" && (
-                  <span className="inline-flex items-center gap-1 font-bold text-amber-950 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
-                    <Package className="size-3 text-amber-800" />
-                    ₹{Math.round(tiedUpInStock).toLocaleString()} Tied in Stock (Cash: ₹0)
-                  </span>
-                )}
+              <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-[#4e584f]">Settlement Status</span>
+                  {status === "LOCKED_IN_STOCK" && (
+                    <span className="inline-flex items-center gap-1 font-bold text-amber-950 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                      <Package className="size-3 text-amber-800" />
+                      ₹{Math.round(tiedUpInStock).toLocaleString()} Tied in Stock
+                    </span>
+                  )}
+                  {status === "PARTIALLY_RECOVERED" && (
+                    <span className="inline-flex items-center gap-1 font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                      <ArrowUp className="size-3" />
+                      Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
+                    </span>
+                  )}
+                  {status === "WITHDRAWABLE" && (
+                    <span className="inline-flex items-center gap-1 font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                      <ArrowUp className="size-3" />
+                      Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
+                    </span>
+                  )}
+                  {status === "PAYABLE_TO_COMPANY" && (
+                    <span className="inline-flex items-center gap-1 font-bold text-rose-900 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
+                      <ArrowDown className="size-3" />
+                      Owes Company ₹{Math.round(payableAmount).toLocaleString()}
+                    </span>
+                  )}
+                  {status === "SETTLED" && (
+                    <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                      Settled ₹0
+                    </span>
+                  )}
+                </div>
                 {status === "PARTIALLY_RECOVERED" && (
-                  <span className="inline-flex items-center gap-1 font-bold text-blue-950 bg-blue-100 px-2 py-0.5 rounded border border-blue-300">
-                    <ArrowUp className="size-3" />
-                    Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
-                  </span>
-                )}
-                {status === "WITHDRAWABLE" && (
-                  <span className="inline-flex items-center gap-1 font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                    <ArrowUp className="size-3" />
-                    Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
-                  </span>
-                )}
-                {status === "PAYABLE_TO_COMPANY" && (
-                  <span className="inline-flex items-center gap-1 font-bold text-rose-900 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
-                    <ArrowDown className="size-3" />
-                    Owes Company ₹{Math.round(payableAmount).toLocaleString()}
-                  </span>
-                )}
-                {status === "SETTLED" && (
-                  <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                    Settled ₹0
-                  </span>
+                  <div className="space-y-1.5 pt-1.5 border-t border-[#edf1e8] text-[11px] text-[#6b746c]">
+                    <div className="flex justify-between items-center">
+                      <span>Available Liquid Profit:</span>
+                      <span className="font-bold text-emerald-900">
+                        ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span>Capital in Warehouse Stock:</span>
+                      <span className="font-semibold text-amber-900">₹{Math.round(tiedUpInStock).toLocaleString()}</span>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -252,6 +271,7 @@ export function PartnersClient({
       <PartnerTransactionModal
         transaction={editingTransaction}
         partners={partners}
+        partnerBalances={partnerBalances}
         isOpen={isModalOpen || Boolean(editingTransaction)}
         onClose={() => {
           setIsModalOpen(false);

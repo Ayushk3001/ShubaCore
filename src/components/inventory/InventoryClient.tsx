@@ -14,11 +14,15 @@ export function InventoryClient({
   suppliers,
   stockMovements,
   bundles = [],
+  partners = [],
+  availableCapital = 0,
 }: {
   products: Array<any>;
   suppliers: Array<any>;
   stockMovements: Array<any>;
   bundles?: Array<any>;
+  partners?: Array<any>;
+  availableCapital?: number;
 }) {
   const [activeTab, setActiveTab] = useState<"PRODUCTS" | "BUNDLES" | "SUPPLIERS" | "MOVEMENTS">("PRODUCTS");
   const [search, setSearch] = useState("");
@@ -555,6 +559,8 @@ export function InventoryClient({
       <ProductModal
         product={selectedProduct}
         suppliers={suppliers}
+        partners={partners}
+        availableCapital={availableCapital}
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
       />
@@ -567,6 +573,8 @@ export function InventoryClient({
 
       <StockAdjustModal
         products={products}
+        partners={partners}
+        availableCapital={availableCapital}
         isOpen={isStockModalOpen}
         onClose={() => setIsStockModalOpen(false)}
       />

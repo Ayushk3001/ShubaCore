@@ -30,6 +30,7 @@ interface OrderDetailModalProps {
       description: string;
       quantity: number;
       unitPrice: any;
+      costPriceSnapshot?: any;
       customizationDetails: string | null;
       bundle?: {
         name: string;
@@ -73,8 +74,12 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
   const totalOrderAmount = Number(order.total);
   const totalPayments = order.payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalExpenses = order.expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalCogs = order.items.reduce(
+    (sum, item) => sum + Number(item.costPriceSnapshot || 0) * item.quantity,
+    0
+  );
   const balance = totalOrderAmount - totalPayments;
-  const netProfit = totalOrderAmount - totalExpenses;
+  const netProfit = totalOrderAmount - totalCogs - totalExpenses;
   const profitMargin = totalOrderAmount > 0 ? ((netProfit / totalOrderAmount) * 100).toFixed(1) : "0";
 
   async function handleStatusChange(newStatus: string) {
@@ -163,13 +168,13 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
         </div>
 
         {error && (
-          <div className="mt-4 rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-600 border border-red-200">
+          <div className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-600 border border-red-200 font-semibold">
             ⚠️ {error}
           </div>
         )}
 
-        {/* Status Lifecycle Stepper */}
-        <div className="mt-4 rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8]">
+        {/* Status Workflow */}
+        <div className="mt-4 rounded-lg border border-[#edf1e8] bg-[#f8faf6] p-3">
           <p className="text-xs font-semibold text-[#4e584f] mb-2">Update Order Status Workflow</p>
           <div className="flex flex-wrap gap-1.5">
             {ORDER_STATUSES.map((st) => {
@@ -177,6 +182,7 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
               return (
                 <button
                   key={st}
+                  type="button"
                   disabled={loading}
                   onClick={() => handleStatusChange(st)}
                   className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
@@ -193,10 +199,14 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
         </div>
 
         {/* Financial Summary Cards */}
-        <div className="mt-4 grid grid-cols-4 gap-3">
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2.5">
           <div className="rounded-lg border border-[#d8ded2] bg-[#fdfdfc] p-3 text-center">
             <p className="text-[10px] font-semibold uppercase text-[#6b746c]">Order Total</p>
             <p className="mt-1 text-base font-bold text-[#20231f]">₹{totalOrderAmount.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-center">
+            <p className="text-[10px] font-semibold uppercase text-amber-800">COGS (Direct Cost)</p>
+            <p className="mt-1 text-base font-bold text-amber-900">₹{totalCogs.toLocaleString()}</p>
           </div>
           <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-center">
             <p className="text-[10px] font-semibold uppercase text-emerald-800">Paid Amount</p>

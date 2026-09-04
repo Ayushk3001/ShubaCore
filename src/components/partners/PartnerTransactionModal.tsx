@@ -15,6 +15,7 @@ interface PartnerTransactionModalProps {
     occurredAt: Date;
   } | null;
   partners: Array<{ id: string; name: string }>;
+  partnerBalances?: Array<any>;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -28,23 +29,48 @@ const TYPES = [
   "OTHER",
 ];
 
-export function PartnerTransactionModal({ transaction, partners, isOpen, onClose }: PartnerTransactionModalProps) {
+export function PartnerTransactionModal({
+  transaction,
+  partners,
+  partnerBalances = [],
+  isOpen,
+  onClose,
+}: PartnerTransactionModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string>(transaction?.partnerId || partners[0]?.id || "");
+  const [txType, setTxType] = useState<string>(transaction?.type || "ADDITIONAL_INVESTMENT");
+  const [amount, setAmount] = useState<number>(transaction ? Number(transaction.amount) : 1);
 
   if (!isOpen) return null;
 
   const isEditing = Boolean(transaction);
+  const isWithdrawalOrReimburse = txType === "WITHDRAWAL" || txType === "REIMBURSEMENT";
+  const currentPartnerBalance = partnerBalances.find((p) => p.id === selectedPartnerId);
+  const availableLiquidCash = currentPartnerBalance ? currentPartnerBalance.liquidCashWithdrawable : 0;
+  const isExceedingWithdrawal = isWithdrawalOrReimburse && amount > availableLiquidCash + 0.01;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     setError("");
 
+    if (isExceedingWithdrawal) {
+      setError(
+        `Withdrawal of ₹${amount.toLocaleString("en-IN")} exceeds ${
+          currentPartnerBalance?.name || "the partner"
+        }'s available liquid cash of ₹${availableLiquidCash.toLocaleString(
+          "en-IN"
+        )}. The rest of their equity is preserved in warehouse stock.`
+      );
+      setLoading(false);
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
     const data = {
-      partnerId: (formData.get("partnerId") as string) || "",
-      type: formData.get("type") as any,
+      partnerId: (formData.get("partnerId") as string) || selectedPartnerId,
+      type: (formData.get("type") as any) || txType,
       amount: Number(formData.get("amount")),
       description: (formData.get("description") as string) || "",
       method: (formData.get("method") as any) || undefined,
@@ -78,7 +104,7 @@ export function PartnerTransactionModal({ transaction, partners, isOpen, onClose
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
           <h2 className="text-lg font-bold text-[#20231f]">
             {isEditing ? "Edit Partner Transaction" : "Record Partner Capital Transaction"}
@@ -100,7 +126,8 @@ export function PartnerTransactionModal({ transaction, partners, isOpen, onClose
             <select
               name="partnerId"
               required
-              defaultValue={transaction?.partnerId || ""}
+              value={selectedPartnerId}
+              onChange={(e) => setSelectedPartnerId(e.target.value)}
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
             >
               <option value="">Select partner...</option>
@@ -118,7 +145,8 @@ export function PartnerTransactionModal({ transaction, partners, isOpen, onClose
               <select
                 name="type"
                 required
-                defaultValue={transaction?.type || "ADDITIONAL_INVESTMENT"}
+                value={txType}
+                onChange={(e) => setTxType(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               >
                 {TYPES.map((t) => (
@@ -130,19 +158,36 @@ export function PartnerTransactionModal({ transaction, partners, isOpen, onClose
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#4e584f]">Amount (₹) *</label>
+              <div className="flex justify-between items-center">
+                <label className="block text-xs font-semibold text-[#4e584f]">Amount (₹) *</label>
+                {isWithdrawalOrReimburse && (
+                  <span className="text-[10px] text-emerald-800 font-bold">
+                    Max: ₹{availableLiquidCash.toLocaleString("en-IN")}
+                  </span>
+                )}
+              </div>
               <input
                 type="number"
                 name="amount"
                 step="0.01"
                 min={1}
                 required
-                defaultValue={transaction ? Number(transaction.amount) : 1}
+                value={amount}
+                onChange={(e) => setAmount(Number(e.target.value) || 0)}
                 placeholder="1"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               />
             </div>
           </div>
+
+          {isExceedingWithdrawal && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
+              <p className="font-bold">⚠️ Exceeds Available Liquid Cash</p>
+              <p className="text-[11px] mt-0.5 text-amber-800">
+                {currentPartnerBalance?.name || "This partner"} can only withdraw up to <strong>₹{availableLiquidCash.toLocaleString("en-IN")}</strong> in cash. The remaining capital is preserved in warehouse stock.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-[#4e584f]">Description *</label>
@@ -193,7 +238,7 @@ export function PartnerTransactionModal({ transaction, partners, isOpen, onClose
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || isExceedingWithdrawal}
               className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
             >
               {loading && <Loader2 className="size-3.5 animate-spin" />}

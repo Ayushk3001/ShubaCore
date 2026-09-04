@@ -222,6 +222,9 @@ export const productSchema = z.object({
   minStock: z.coerce.number().int().nonnegative().default(10),
   purchaseCost: moneySchema,
   supplierId: optionalStringSchema,
+  fundingSource: z.enum(["NONE", "COMPANY_PROFIT", "PARTNER_OUT_OF_POCKET"]).optional().default("NONE"),
+  fundingPartnerId: optionalStringSchema,
+  fundingMethod: PaymentMethodEnum.optional().default("UPI"),
 });
 
 // Stock Movement Validation
@@ -230,6 +233,9 @@ export const stockMovementSchema = z.object({
   type: StockMovementTypeEnum,
   quantity: z.coerce.number().int(),
   reference: optionalStringSchema,
+  fundingSource: z.enum(["NONE", "COMPANY_PROFIT", "PARTNER_OUT_OF_POCKET"]).optional().default("NONE"),
+  fundingPartnerId: optionalStringSchema,
+  fundingMethod: PaymentMethodEnum.optional().default("UPI"),
 });
 
 

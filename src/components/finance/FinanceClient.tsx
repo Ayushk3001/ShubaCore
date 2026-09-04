@@ -30,7 +30,12 @@ export function FinanceClient({
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [partnerTxPreFill, setPartnerTxPreFill] = useState<{ partnerId: string; type: string } | null>(null);
 
-  const totalIncome = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  // Net cash collected: REFUND payments are money returned to the customer, so they
+  // subtract from income rather than adding to it (a refund is not revenue received).
+  const totalIncome = payments.reduce(
+    (sum, p) => sum + (p.type === "REFUND" ? -Number(p.amount) : Number(p.amount)),
+    0
+  );
 
   const {
     totalRevenue,
@@ -396,44 +401,89 @@ export function FinanceClient({
       {activeTab === "CAPITAL_RECOVERY" && (
         <div className="rounded-xl border border-[#d8ded2] bg-white p-6 shadow-sm space-y-6">
           <div>
-            <h3 className="text-base font-bold text-[#20231f]">Capital Investment & Recovery Dashboard</h3>
+            <h3 className="text-base font-bold text-[#20231f]">Capital Investment & Profit Recovery Dashboard</h3>
             <p className="text-xs text-[#6b746c] mt-0.5">
-              Tracks initial inventory stock purchases, cash inflow recovery, and unsold warehouse assets.
+              Tracks partner capital investments, profit earned to recover that capital, remaining balance to recoup, and physical stock assets. Dynamically updates as you invest more or reinvest profits.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="rounded-lg border border-[#d8ded2] bg-[#f8faf6] p-4">
-              <span className="text-xs font-bold text-[#4e584f] uppercase">Total Capital Invested</span>
+              <span className="text-xs font-bold text-[#4e584f] uppercase tracking-wider">Total Capital Invested</span>
               <p className="mt-2 text-2xl font-bold text-[#20231f]">₹{totalCapitalInvested.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-[#6b746c]">Bulk Stock Purchases & CapEx</p>
+              <p className="mt-1 text-[11px] text-[#6b746c]">All partner capital injected</p>
             </div>
 
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
-              <span className="text-xs font-bold text-emerald-900 uppercase">Cash Recovered (Inflows)</span>
-              <p className="mt-2 text-2xl font-bold text-emerald-950">₹{totalRevenue.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-emerald-800">Customer order payments collected</p>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wider">Profit Recovered (Realized)</span>
+              <p className="mt-2 text-2xl font-bold text-emerald-950">₹{netProfit.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-emerald-800">Net profit earned from business sales</p>
             </div>
 
-            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
-              <span className="text-xs font-bold text-amber-900 uppercase">Unrecovered Capital Balance</span>
+            <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4">
+              <span className="text-xs font-bold text-amber-950 uppercase tracking-wider">Remaining to Recoup</span>
               <p className="mt-2 text-2xl font-bold text-amber-950">₹{unrecoveredCapitalBalance.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-amber-800">Covered by ₹{inventoryAssetValuation.toLocaleString()} warehouse stock</p>
+              <p className="mt-1 text-[11px] text-amber-800">Needed from future profits to recover capital</p>
+            </div>
+
+            <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+              <span className="text-xs font-bold text-blue-950 uppercase tracking-wider">Warehouse Stock Assets</span>
+              <p className="mt-2 text-2xl font-bold text-blue-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-blue-800">Physical stock backing your capital</p>
             </div>
           </div>
 
-          {/* Capital Recovery Progress */}
-          <div className="rounded-lg border border-[#d8ded2] bg-white p-4 space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-[#20231f]">
-              <span>Capital Recovery Rate</span>
-              <span>{capitalRecoveredPercent}%</span>
+          {/* Visual Progress Meter (Profit-Based Recovery) */}
+          <div className="rounded-xl border border-[#d8ded2] bg-[#fcfdfa] p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-[#263326]">
+                  Capital Recovery from Profit
+                </span>
+                <p className="text-xs text-[#6b746c] mt-0.5">
+                  ₹{netProfit.toLocaleString()} net profit earned of ₹{totalCapitalInvested.toLocaleString()} capital invested
+                </p>
+              </div>
+              <span className="text-xl font-black text-[#263326]">{capitalRecoveredPercent}% Recouped</span>
             </div>
-            <div className="h-3 w-full rounded-full bg-[#edf1e8] overflow-hidden">
+
+            <div className="h-4 w-full rounded-full bg-[#edf1e8] overflow-hidden p-0.5 border border-[#d8ded2]">
               <div
-                className="h-full bg-[#263326] transition-all duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-[#263326] transition-all duration-700 shadow-sm"
                 style={{ width: `${Math.min(100, Number(capitalRecoveredPercent))}%` }}
               />
             </div>
+
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs text-[#5f685e] pt-1 gap-1">
+              <span>
+                🟢 <strong>₹{netProfit.toLocaleString()}</strong> Profit Recovered ({capitalRecoveredPercent}%)
+              </span>
+              <span className="font-semibold text-amber-900">
+                🟡 <strong>₹{unrecoveredCapitalBalance.toLocaleString()}</strong> Remaining to Recoup (Covered by ₹{inventoryAssetValuation.toLocaleString()} Warehouse Stock)
+              </span>
+            </div>
+          </div>
+
+          {/* Dynamic Reinvestment & Recovery Analysis */}
+          <div className="rounded-lg border border-[#d8ded2] bg-[#fdfdfc] p-4 text-xs text-[#5f685e] space-y-2">
+            <p className="font-bold text-[#20231f]">Dynamic Reinvestment & Recovery Logic:</p>
+            <ul className="list-disc list-inside space-y-1.5 text-[11px] text-[#4e584f]">
+              <li>
+                <strong>Capital Contributed:</strong> You currently have <strong>₹{totalCapitalInvested.toLocaleString()}</strong> invested by partners. As you inject more investment in the future, this capital base updates dynamically.
+              </li>
+              <li>
+                <strong>Profit-Based Recovery:</strong> The business has generated <strong>₹{netProfit.toLocaleString()} in net profit</strong> so far (<strong>{capitalRecoveredPercent}% of capital recovered</strong>).
+              </li>
+              <li>
+                <strong>Remaining to Recoup:</strong> You need <strong>₹{unrecoveredCapitalBalance.toLocaleString()} in future net profits</strong> to fully recoup your invested capital.
+              </li>
+              <li>
+                <strong>Warehouse Asset Cushion:</strong> Your warehouse holds <strong>₹{inventoryAssetValuation.toLocaleString()} in physical products</strong>. When you sell those products and generate more profit, the recovery meter automatically moves forward.
+              </li>
+              <li>
+                <strong>Reinvestment:</strong> From the ₹{totalRevenue.toLocaleString()} sales revenue, ₹{(totalRevenue - netProfit).toLocaleString()} was reinvested to restock inventory, ensuring continuous operational growth.
+              </li>
+            </ul>
           </div>
         </div>
       )}
@@ -538,16 +588,18 @@ export function FinanceClient({
                                 <Package className="size-3 text-amber-800" />
                                 ₹{Math.round(p.tiedUpInStock).toLocaleString()} Tied in Stock
                               </span>
-                              <span className="text-[10px] text-amber-800 mt-0.5">Cash Withdrawable: ₹0</span>
+                              <span className="text-[10px] text-amber-800 mt-0.5">Cash Profit: ₹0</span>
                             </div>
                           )}
                           {p.status === "PARTIALLY_RECOVERED" && (
                             <div className="inline-flex flex-col items-end">
-                              <span className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-950 border border-blue-300">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-900 border border-emerald-300">
                                 <ArrowUp className="size-3" />
                                 Can Withdraw ₹{Math.round(p.liquidCashWithdrawable).toLocaleString()}
                               </span>
-                              <span className="text-[10px] text-blue-800 mt-0.5">₹{Math.round(p.tiedUpInStock).toLocaleString()} Tied in Stock</span>
+                              <span className="text-[10px] text-[#6b746c] mt-0.5">
+                                ₹{Math.round(p.allocatedProfit)} profit | ₹{Math.round(p.tiedUpInStock)} in warehouse stock
+                              </span>
                             </div>
                           )}
                           {p.status === "WITHDRAWABLE" && (

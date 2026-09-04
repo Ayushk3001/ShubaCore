@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-import { calculateProfitMetrics } from "@/lib/profit";
-import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag, Coins, Package, ShieldCheck } from "lucide-react";
+import { calculateProfitMetrics, calculatePartnerBalances } from "@/lib/profit";
+import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag, Coins, Package, ShieldCheck, Wallet } from "lucide-react";
 
 export default async function ReportsPage() {
   await requireUser();
@@ -36,6 +36,12 @@ export default async function ReportsPage() {
     unrecoveredCapitalBalance,
     capitalRecoveredPercent,
   } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
+
+  const {
+    totalLiquidCashWithdrawable,
+    totalTiedUpInStock,
+    totalPartnerContributed,
+  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue });
 
   // Revenue by Partner
   const revenueByPartner = partners.map((p) => {
@@ -73,7 +79,7 @@ export default async function ReportsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Analytics & Business Reports</h1>
         <p className="mt-1 text-sm text-[#6b746c]">
-          Real-time profitability, inventory asset valuation, OpEx vs CapEx separation, and sales channels breakdown.
+          Real-time profitability, available company liquid capital, inventory asset valuation, and sales breakdown.
         </p>
       </div>
 
@@ -105,28 +111,45 @@ export default async function ReportsPage() {
         </div>
       </div>
 
-      {/* Capital Recovery & Asset Breakdown */}
+      {/* Capital Availability & Asset Breakdown */}
       <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm space-y-4">
         <div className="flex items-center gap-2 border-b border-[#edf1e8] pb-3">
-          <ShieldCheck className="size-4 text-[#3f563f]" />
-          <h2 className="text-sm font-bold text-[#20231f]">Capital Investment & Stock Asset Recovery</h2>
+          <Wallet className="size-4 text-[#3f563f]" />
+          <h2 className="text-sm font-bold text-[#20231f]">Capital Availability & Business Asset Valuation</h2>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
-          <div className="rounded-lg border border-[#edf1e8] bg-[#f8faf6] p-3">
-            <span className="font-semibold text-[#6b746c]">Capital Stock Investments</span>
-            <p className="mt-1 text-lg font-bold text-[#20231f]">₹{totalCapitalInvested.toLocaleString()}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-xs">
+          <div className="rounded-lg border border-emerald-300 bg-emerald-50/80 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-emerald-950 uppercase tracking-wider text-[11px]">Liquid Cash in Bank/Register</span>
+              <Coins className="size-4 text-emerald-800" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-emerald-950">₹{totalLiquidCashWithdrawable.toLocaleString()}</p>
+            <p className="mt-1 text-[10px] text-emerald-800 font-medium">
+              Free profit available for withdrawal or purchases
+            </p>
           </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-            <span className="font-semibold text-emerald-900">Cash Recovered (Inflows)</span>
-            <p className="mt-1 text-lg font-bold text-emerald-950">₹{totalRevenue.toLocaleString()}</p>
+
+          <div className="rounded-lg border border-amber-300 bg-amber-50/80 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">Warehouse Physical Stock</span>
+              <Package className="size-4 text-amber-800" />
+            </div>
+            <p className="mt-2 text-2xl font-black text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+            <p className="mt-1 text-[10px] text-amber-800 font-medium">
+              Value of all products on shelves
+            </p>
           </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
-            <span className="font-semibold text-amber-900">On-Hand Warehouse Stock</span>
-            <p className="mt-1 text-lg font-bold text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+
+          <div className="rounded-lg border border-[#edf1e8] bg-[#f8faf6] p-4">
+            <span className="font-semibold text-[#6b746c] uppercase tracking-wider text-[11px]">Partner Contributed Capital</span>
+            <p className="mt-2 text-2xl font-bold text-[#20231f]">₹{totalPartnerContributed.toLocaleString()}</p>
+            <p className="mt-1 text-[10px] text-[#8a948b]">Preserved inside warehouse stock</p>
           </div>
-          <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
-            <span className="font-semibold text-blue-900">Capital Recovery Progress</span>
-            <p className="mt-1 text-lg font-bold text-blue-950">{capitalRecoveredPercent}%</p>
+
+          <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-4">
+            <span className="font-semibold text-blue-900 uppercase tracking-wider text-[11px]">Total Business Net Worth</span>
+            <p className="mt-2 text-2xl font-bold text-blue-950">₹{(inventoryAssetValuation + totalLiquidCashWithdrawable).toLocaleString()}</p>
+            <p className="mt-1 text-[10px] text-blue-800">₹{inventoryAssetValuation.toLocaleString()} Stock + ₹{totalLiquidCashWithdrawable.toLocaleString()} Cash</p>
           </div>
         </div>
       </div>

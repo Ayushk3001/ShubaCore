@@ -22,6 +22,7 @@ import {
 } from "@/lib/validations";
 import { Prisma } from "@/generated/prisma/client";
 import { serializeData } from "@/lib/serialize";
+import { calculateProfitMetrics, calculatePartnerBalances } from "@/lib/profit";
 const Decimal = Prisma.Decimal;
 
 function formatError(err: unknown, defaultMessage: string): { success: false; error: string } {
@@ -949,29 +950,53 @@ export async function createExpenseAction(formData: unknown) {
     }
     const parsed = expenseSchema.parse(formData);
 
-    const expense = await prisma.expense.create({
-      data: {
-        category: parsed.category,
-        type: parsed.type || "OPERATING_EXPENSE",
-        amount: new Decimal(parsed.amount),
-        description: parsed.description,
-        orderId: parsed.orderId || null,
-        paidById: parsed.paidById || user.id,
-        method: parsed.method,
-        expenseDate: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
-        createdById: user.id,
-      },
-    });
+    const expense = await prisma.$transaction(async (tx) => {
+      const newExpense = await tx.expense.create({
+        data: {
+          category: parsed.category,
+          type: parsed.type || "OPERATING_EXPENSE",
+          amount: new Decimal(parsed.amount),
+          description: parsed.description,
+          orderId: parsed.orderId || null,
+          paidById: parsed.paidById || user.id,
+          method: parsed.method,
+          expenseDate: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
+          createdById: user.id,
+        },
+      });
 
-    await logAudit({
-      actorId: user.id,
-      action: "RECORD_EXPENSE",
-      entityType: "Expense",
-      entityId: expense.id,
-      metadata: { amount: parsed.amount, category: parsed.category, type: parsed.type },
+      // If paid by a partner out-of-pocket, automatically mirror to Partner Capital Ledger Audit History
+      if (parsed.paidById && parsed.method !== "PARTNER_CAPITAL") {
+        const partnerUser = await tx.user.findUnique({ where: { id: parsed.paidById } });
+        if (partnerUser && partnerUser.role === "PARTNER") {
+          await tx.partnerTransaction.create({
+            data: {
+              partnerId: partnerUser.id,
+              type: "EXPENSE_PAID",
+              amount: new Decimal(parsed.amount),
+              description: parsed.description,
+              method: parsed.method || null,
+              occurredAt: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
+              createdById: user.id,
+            },
+          });
+        }
+      }
+
+      await logAudit({
+        actorId: user.id,
+        action: "RECORD_EXPENSE",
+        entityType: "Expense",
+        entityId: newExpense.id,
+        metadata: { amount: parsed.amount, category: parsed.category, type: parsed.type },
+        tx,
+      });
+
+      return newExpense;
     });
 
     revalidatePath("/finance");
+    revalidatePath("/partners");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
     return { success: true as const, expense: serializeData(expense) };
@@ -988,28 +1013,34 @@ export async function updateExpenseAction(id: string, formData: unknown) {
     }
     const parsed = expenseSchema.parse(formData);
 
-    const expense = await prisma.expense.update({
-      where: { id },
-      data: {
-        category: parsed.category,
-        type: parsed.type || "OPERATING_EXPENSE",
-        amount: new Decimal(parsed.amount),
-        description: parsed.description,
-        orderId: parsed.orderId || null,
-        paidById: parsed.paidById || user.id,
-        method: parsed.method,
-        expenseDate: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
-      },
-    });
+    const expense = await prisma.$transaction(async (tx) => {
+      const updatedExpense = await tx.expense.update({
+        where: { id },
+        data: {
+          category: parsed.category,
+          type: parsed.type || "OPERATING_EXPENSE",
+          amount: new Decimal(parsed.amount),
+          description: parsed.description,
+          orderId: parsed.orderId || null,
+          paidById: parsed.paidById || user.id,
+          method: parsed.method,
+          expenseDate: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
+        },
+      });
 
-    await logAudit({
-      actorId: user.id,
-      action: "UPDATE_EXPENSE",
-      entityType: "Expense",
-      entityId: expense.id,
+      await logAudit({
+        actorId: user.id,
+        action: "UPDATE_EXPENSE",
+        entityType: "Expense",
+        entityId: updatedExpense.id,
+        tx,
+      });
+
+      return updatedExpense;
     });
 
     revalidatePath("/finance");
+    revalidatePath("/partners");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
     return { success: true as const, expense: serializeData(expense) };
@@ -1027,6 +1058,52 @@ export async function createPartnerTransactionAction(formData: unknown) {
       return { success: false, error: "Not authorized." };
     }
     const parsed = partnerTransactionSchema.parse(formData);
+
+    // Guard against over-withdrawal: a cash-out (WITHDRAWAL / REIMBURSEMENT) must not
+    // exceed the partner's current positive equity. Without this, a partner could pull out
+    // money they don't have, driving their balance negative and breaking settlement
+    // reconciliation. Equity is recomputed live from the ledgers using the same engine the
+    // finance UI uses, so the guard always matches what's displayed.
+    if (parsed.type === "WITHDRAWAL" || parsed.type === "REIMBURSEMENT") {
+      const [orders, allExpenses, existingTxns, partners] = await Promise.all([
+        prisma.order.findMany({ include: { items: true } }),
+        prisma.expense.findMany(),
+        prisma.partnerTransaction.findMany(),
+        prisma.user.findMany({
+          where: { role: "PARTNER" },
+          select: { id: true, name: true, isActive: true },
+        }),
+      ]);
+
+      const { netProfit, totalRevenue } = calculateProfitMetrics({
+        orders,
+        expenses: allExpenses,
+        partnerTransactions: existingTxns,
+      });
+
+      const { partnerBalances } = calculatePartnerBalances({
+        partners,
+        partnerTransactions: existingTxns,
+        expenses: allExpenses,
+        netProfit,
+        totalRevenue,
+      });
+
+      const balance = partnerBalances.find((p) => p.id === parsed.partnerId);
+      const available = balance ? balance.withdrawableAmount : 0;
+      const requested = Number(parsed.amount);
+
+      // 1-paise tolerance so an exact full withdrawal isn't rejected on rounding dust.
+      if (requested > available + 0.01) {
+        const label = parsed.type === "REIMBURSEMENT" ? "reimbursement" : "withdrawal";
+        return {
+          success: false,
+          error: `This ${label} of ₹${requested.toLocaleString("en-IN")} exceeds ${
+            balance ? balance.name : "the partner"
+          }'s withdrawable balance of ₹${available.toLocaleString("en-IN")}.`,
+        };
+      }
+    }
 
     const transaction = await prisma.partnerTransaction.create({
       data: {
@@ -1271,33 +1348,98 @@ export async function updateSupplierAction(id: string, formData: unknown) {
   }
 }
 
+async function checkCompanyCapitalAvailability(tx: any, requiredAmount: number) {
+  const [orders, expenses, partnerTransactions, partners, products] = await Promise.all([
+    tx.order.findMany({ include: { items: true } }),
+    tx.expense.findMany(),
+    tx.partnerTransaction.findMany(),
+    tx.user.findMany({ where: { role: "PARTNER" } }),
+    tx.product.findMany({ where: { isActive: true }, select: { id: true, currentStock: true, purchaseCost: true } }),
+  ]);
+  const { netProfit, totalRevenue } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
+  const { totalLiquidCashWithdrawable: availableCapital } = calculatePartnerBalances({
+    partners,
+    partnerTransactions,
+    expenses,
+    netProfit,
+    totalRevenue,
+  });
+
+  if (requiredAmount > availableCapital + 0.01) {
+    throw new Error(
+      `Insufficient available company capital (Available: ₹${availableCapital.toLocaleString("en-IN")}, Required: ₹${requiredAmount.toLocaleString("en-IN")}). Please select 'Paid by Partner Out-of-Pocket' or add a partner capital investment first.`
+    );
+  }
+}
+
 export async function createProductAction(formData: unknown) {
   try {
     const user = await requireUser();
     const parsed = productSchema.parse(formData);
 
-    const product = await prisma.product.create({
-      data: {
-        name: parsed.name,
-        sku: parsed.sku.toUpperCase(),
-        category: parsed.category || null,
-        unit: parsed.unit || "pcs",
-        currentStock: parsed.currentStock,
-        minStock: parsed.minStock,
-        purchaseCost: new Decimal(parsed.purchaseCost),
-        supplierId: parsed.supplierId || null,
-      },
-    });
+    const product = await prisma.$transaction(async (tx) => {
+      // Automatically record expense if funded via Company Profit or Partner
+      if (parsed.currentStock > 0 && parsed.fundingSource && parsed.fundingSource !== "NONE") {
+        const totalAmount = new Decimal(parsed.purchaseCost).mul(parsed.currentStock);
+        if (totalAmount.greaterThan(0)) {
+          const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          if (isCompanyProfit) {
+            await checkCompanyCapitalAvailability(tx, totalAmount.toNumber());
+          }
+        }
+      }
 
-    await logAudit({
-      actorId: user.id,
-      action: "CREATE_PRODUCT",
-      entityType: "Product",
-      entityId: product.id,
-      metadata: { name: product.name, sku: product.sku, stock: product.currentStock },
+      const newProduct = await tx.product.create({
+        data: {
+          name: parsed.name,
+          sku: parsed.sku.toUpperCase(),
+          category: parsed.category || null,
+          unit: parsed.unit || "pcs",
+          currentStock: parsed.currentStock,
+          minStock: parsed.minStock,
+          purchaseCost: new Decimal(parsed.purchaseCost),
+          supplierId: parsed.supplierId || null,
+        },
+      });
+
+      if (parsed.currentStock > 0 && parsed.fundingSource && parsed.fundingSource !== "NONE") {
+        const totalAmount = new Decimal(parsed.purchaseCost).mul(parsed.currentStock);
+        if (totalAmount.greaterThan(0)) {
+          const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          await tx.expense.create({
+            data: {
+              category: "MATERIALS",
+              type: "INVENTORY_PURCHASE",
+              amount: totalAmount,
+              description: `Initial stock for ${newProduct.name} (${newProduct.sku}) - ${parsed.currentStock} ${newProduct.unit} (${
+                isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
+              })`,
+              paidById: isCompanyProfit ? null : (parsed.fundingPartnerId || user.id),
+              method: isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI"),
+              expenseDate: new Date(),
+              createdById: user.id,
+            },
+          });
+        }
+      }
+
+      await logAudit({
+        actorId: user.id,
+        action: "CREATE_PRODUCT",
+        entityType: "Product",
+        entityId: newProduct.id,
+        metadata: { name: newProduct.name, sku: newProduct.sku, stock: newProduct.currentStock, fundingSource: parsed.fundingSource },
+        tx,
+      });
+
+      return newProduct;
     });
 
     revalidatePath("/inventory");
+    revalidatePath("/finance");
+    revalidatePath("/partners");
+    revalidatePath("/reports");
+    revalidatePath("/dashboard");
     return { success: true as const, product: serializeData(product) };
   } catch (err) {
     return formatError(err, "Failed to create product.");
@@ -1331,6 +1473,10 @@ export async function updateProductAction(id: string, formData: unknown) {
     });
 
     revalidatePath("/inventory");
+    revalidatePath("/finance");
+    revalidatePath("/partners");
+    revalidatePath("/reports");
+    revalidatePath("/dashboard");
     return { success: true as const, product: serializeData(product) };
   } catch (err) {
     return formatError(err, "Failed to update product.");
@@ -1343,6 +1489,21 @@ export async function recordStockMovementAction(formData: unknown) {
     const parsed = stockMovementSchema.parse(formData);
 
     const result = await prisma.$transaction(async (tx) => {
+      const targetProduct = await tx.product.findUniqueOrThrow({
+        where: { id: parsed.productId },
+      });
+
+      // If this is a PURCHASE movement and user specified a funding source, check capital
+      if (parsed.type === "PURCHASE" && parsed.quantity > 0 && parsed.fundingSource && parsed.fundingSource !== "NONE") {
+        const totalAmount = new Decimal(targetProduct.purchaseCost).mul(parsed.quantity);
+        if (totalAmount.greaterThan(0)) {
+          const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          if (isCompanyProfit) {
+            await checkCompanyCapitalAvailability(tx, totalAmount.toNumber());
+          }
+        }
+      }
+
       const movement = await tx.stockMovement.create({
         data: {
           productId: parsed.productId,
@@ -1360,19 +1521,40 @@ export async function recordStockMovementAction(formData: unknown) {
         stockDelta = Math.abs(parsed.quantity);
       }
 
-      await tx.product.update({
+      const updatedProduct = await tx.product.update({
         where: { id: parsed.productId },
         data: {
           currentStock: { increment: stockDelta },
         },
       });
 
+      if (parsed.type === "PURCHASE" && parsed.quantity > 0 && parsed.fundingSource && parsed.fundingSource !== "NONE") {
+        const totalAmount = new Decimal(updatedProduct.purchaseCost).mul(parsed.quantity);
+        if (totalAmount.greaterThan(0)) {
+          const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          await tx.expense.create({
+            data: {
+              category: "MATERIALS",
+              type: "INVENTORY_PURCHASE",
+              amount: totalAmount,
+              description: `Restock purchase of ${parsed.quantity} ${updatedProduct.unit} for ${updatedProduct.name} (${updatedProduct.sku}) - ${
+                isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
+              }`,
+              paidById: isCompanyProfit ? null : (parsed.fundingPartnerId || user.id),
+              method: isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI"),
+              expenseDate: new Date(),
+              createdById: user.id,
+            },
+          });
+        }
+      }
+
       await logAudit({
         actorId: user.id,
         action: "RECORD_STOCK_MOVEMENT",
         entityType: "StockMovement",
         entityId: movement.id,
-        metadata: { productId: parsed.productId, type: parsed.type, quantity: parsed.quantity },
+        metadata: { productId: parsed.productId, type: parsed.type, quantity: parsed.quantity, fundingSource: parsed.fundingSource },
         tx,
       });
 
@@ -1380,6 +1562,10 @@ export async function recordStockMovementAction(formData: unknown) {
     });
 
     revalidatePath("/inventory");
+    revalidatePath("/finance");
+    revalidatePath("/partners");
+    revalidatePath("/reports");
+    revalidatePath("/dashboard");
     return { success: true as const, movement: serializeData(result) };
   } catch (err) {
     return formatError(err, "Failed to record stock movement.");

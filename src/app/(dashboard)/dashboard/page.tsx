@@ -47,7 +47,11 @@ export default async function DashboardPage() {
     marginPercent,
   } = calculateProfitMetrics({ orders: allOrders, expenses, partnerTransactions, products });
 
-  const totalCollected = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  // REFUND payments are cash returned to the customer, so they reduce the net collected.
+  const totalCollected = payments.reduce(
+    (sum, p) => sum + (p.type === "REFUND" ? -Number(p.amount) : Number(p.amount)),
+    0
+  );
   const activeOrdersCount = allOrders.filter((o) => !["COMPLETED", "CANCELLED"].includes(o.status)).length;
 
   return (
