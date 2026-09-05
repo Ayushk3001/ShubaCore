@@ -158,6 +158,10 @@ export const orderSchema = z.object({
     (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) ? 0 : Number(val)),
     moneySchema.default(0)
   ),
+  packingCost: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined || Number.isNaN(Number(val)) ? 0 : Number(val)),
+    moneySchema.default(0)
+  ),
   deliveryAddress: optionalStringSchema,
   notes: optionalStringSchema,
   items: z.array(orderItemSchema).min(1, "At least one item is required"),

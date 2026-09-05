@@ -14,6 +14,7 @@ interface OrderDetailModalProps {
     status: string;
     subtotal: any;
     discount: any;
+    packingCost?: any;
     total: any;
     deliveryAddress: string | null;
     notes: string | null;
@@ -72,12 +73,14 @@ export function OrderDetailModal({ order, isOpen, onClose, onEdit }: OrderDetail
   if (!isOpen || !order) return null;
 
   const totalOrderAmount = Number(order.total);
+  const packingCost = Number(order.packingCost || 0);
   const totalPayments = order.payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalExpenses = order.expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const totalCogs = order.items.reduce(
+  const itemsCogs = order.items.reduce(
     (sum, item) => sum + Number(item.costPriceSnapshot || 0) * item.quantity,
     0
   );
+  const totalCogs = itemsCogs + packingCost;
   const balance = totalOrderAmount - totalPayments;
   const netProfit = totalOrderAmount - totalCogs - totalExpenses;
   const profitMargin = totalOrderAmount > 0 ? ((netProfit / totalOrderAmount) * 100).toFixed(1) : "0";

@@ -15,6 +15,7 @@ type OrderWithRelations = {
   status: string;
   subtotal: any;
   discount: any;
+  packingCost?: any;
   total: any;
   deliveryAddress: string | null;
   notes: string | null;

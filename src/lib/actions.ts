@@ -319,6 +319,7 @@ export async function convertLeadToOrderAction(formData: unknown) {
               status: "NEW",
               subtotal: new Decimal(subtotal),
               discount: new Decimal(0),
+              packingCost: new Decimal(0),
               total: new Decimal(subtotal),
               deliveryAddress: parsed.deliveryAddress || null,
               notes: parsed.notes || lead.notes || null,
@@ -523,7 +524,8 @@ export async function createOrderAction(formData: unknown) {
       (sum, item) => sum + item.quantity * item.unitPrice,
       0
     );
-    const total = Math.max(0, subtotal - (parsed.discount || 0));
+    const packingCost = parsed.packingCost || 0;
+    const total = Math.max(0, subtotal + packingCost - (parsed.discount || 0));
 
     const orderStatus = parsed.status || "NEW";
 
@@ -563,6 +565,7 @@ export async function createOrderAction(formData: unknown) {
               status: orderStatus,
               subtotal: new Decimal(subtotal),
               discount: new Decimal(parsed.discount || 0),
+              packingCost: new Decimal(packingCost),
               total: new Decimal(total),
               deliveryAddress: parsed.deliveryAddress || null,
               notes: parsed.notes || null,
@@ -616,7 +619,8 @@ export async function updateOrderAction(id: string, formData: unknown) {
       (sum, item) => sum + item.quantity * item.unitPrice,
       0
     );
-    const total = Math.max(0, subtotal - (parsed.discount || 0));
+    const packingCost = parsed.packingCost || 0;
+    const total = Math.max(0, subtotal + packingCost - (parsed.discount || 0));
 
     const order = await prisma.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
@@ -686,6 +690,7 @@ export async function updateOrderAction(id: string, formData: unknown) {
           status: parsed.status || "NEW",
           subtotal: new Decimal(subtotal),
           discount: new Decimal(parsed.discount || 0),
+          packingCost: new Decimal(packingCost),
           total: new Decimal(total),
           deliveryAddress: parsed.deliveryAddress || null,
           notes: parsed.notes || null,
@@ -1012,12 +1017,17 @@ export async function createExpenseAction(formData: unknown) {
   }
 }
 
-export async function updateExpenseAction(id: string, formData: unknown) {
+export async function updateExpenseAction(id: string | undefined | null, formData: unknown) {
   try {
     const user = await requireUser();
     if (!canManageFinance(user)) {
       return { success: false, error: "Not authorized." };
     }
+
+    if (!id || typeof id !== "string" || id.trim() === "" || id === "undefined" || id === "null") {
+      return createExpenseAction(formData);
+    }
+
     const parsed = expenseSchema.parse(formData);
 
     const expense = await prisma.$transaction(async (tx) => {
@@ -1268,12 +1278,17 @@ export async function createPartnerTransactionAction(formData: unknown) {
   }
 }
 
-export async function updatePartnerTransactionAction(id: string, formData: unknown) {
+export async function updatePartnerTransactionAction(id: string | undefined | null, formData: unknown) {
   try {
     const user = await requireUser();
     if (!canManagePartnerTransactions(user)) {
       return { success: false, error: "Not authorized." };
     }
+
+    if (!id || typeof id !== "string" || id.trim() === "" || id === "undefined" || id === "null") {
+      return createPartnerTransactionAction(formData);
+    }
+
     const parsed = partnerTransactionSchema.parse(formData);
 
     const transaction = await prisma.partnerTransaction.update({

@@ -179,6 +179,7 @@ model Order {
   status            OrderStatus   @default(NEW)
   subtotal          Decimal       @default(0) @db.Decimal(12, 2)
   discount          Decimal       @default(0) @db.Decimal(12, 2)
+  packingCost       Decimal       @default(0) @db.Decimal(12, 2)
   total             Decimal       @default(0) @db.Decimal(12, 2)
   deliveryAddress   String?
   notes             String?

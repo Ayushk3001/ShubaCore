@@ -9,6 +9,7 @@ interface OrderLike {
   orderNumber?: string;
   total?: number | any;
   discount?: number | any;
+  packingCost?: number | any;
   status?: string;
   items?: OrderItemLike[];
   expenses?: Array<{ amount: number | any }>;
@@ -40,6 +41,7 @@ interface PaymentLike {
 
 export function calculateOrderGrossProfit(order: {
   discount?: number | any;
+  packingCost?: number | any;
   items?: OrderItemLike[];
 }): number {
   const items = order.items || [];
@@ -94,7 +96,8 @@ export function calculateProfitMetrics({
     const orderCogs = items.reduce((itemSum, item) => {
       return itemSum + Number(item.costPriceSnapshot || 0) * Number(item.quantity || 0);
     }, 0);
-    return sum + orderCogs;
+    const packingCost = Number(o.packingCost || 0);
+    return sum + orderCogs + packingCost;
   }, 0);
 
   const grossProfit = activeOrders.reduce((sum, o) => {

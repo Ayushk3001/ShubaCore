@@ -18,6 +18,7 @@ interface OrderModalProps {
     deliveryDate: Date | null;
     deliveryAddress: string | null;
     discount: any;
+    packingCost?: any;
     notes: string | null;
     items: Array<{
       productId?: string | null;
@@ -50,6 +51,7 @@ export function OrderModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [discount, setDiscount] = useState(0);
+  const [packingCost, setPackingCost] = useState(0);
   const [globalMargin, setGlobalMargin] = useState<number | "">("");
 
   const [items, setItems] = useState<
@@ -72,6 +74,7 @@ export function OrderModal({
   useEffect(() => {
     if (order) {
       setDiscount(Number(order.discount) || 0);
+      setPackingCost(Number(order.packingCost) || 0);
       if (order.items && order.items.length > 0) {
         setItems(
           order.items.map((i) => {
@@ -96,6 +99,7 @@ export function OrderModal({
       }
     } else {
       setDiscount(0);
+      setPackingCost(0);
       setGlobalMargin("");
       setItems([{ description: "", quantity: 1, costPrice: 0, unitPrice: 0, marginRate: 0, customizationDetails: "" }]);
     }
@@ -211,9 +215,10 @@ export function OrderModal({
   }
 
   // Financial Breakdown Calculations
-  const totalCogs = items.reduce((sum, item) => sum + item.quantity * (item.costPrice || 0), 0);
+  const itemsCogs = items.reduce((sum, item) => sum + item.quantity * (item.costPrice || 0), 0);
+  const totalCogs = itemsCogs + (Number(packingCost) || 0);
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const total = Math.max(0, subtotal - discount);
+  const total = Math.max(0, subtotal + (Number(packingCost) || 0) - (Number(discount) || 0));
   const projectedGrossProfit = total - totalCogs;
   const overallGrossMarginPercent = total > 0 ? ((projectedGrossProfit / total) * 100).toFixed(1) : "0";
 
@@ -233,6 +238,7 @@ export function OrderModal({
       deliveryDate: (formData.get("deliveryDate") as string) || undefined,
       deliveryAddress: (formData.get("deliveryAddress") as string) || undefined,
       discount,
+      packingCost: Number(packingCost || 0),
       notes: (formData.get("notes") as string) || undefined,
       items: items.map((item) => ({
         productId: item.productId,
@@ -597,19 +603,39 @@ export function OrderModal({
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs pt-1 border-t border-[#edf1e8]">
-              <div>
-                <label className="font-semibold text-[#4e584f]">Order Discount (₹):</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={discount}
-                  onChange={(e) => setDiscount(Number(e.target.value))}
-                  className="ml-2 w-24 rounded-md border border-[#d8ded2] bg-white px-2 py-0.5 text-xs focus:outline-none"
-                />
+            <div className="flex flex-wrap items-center justify-between text-xs pt-1 border-t border-[#edf1e8] gap-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <div>
+                  <label className="font-semibold text-[#4e584f]">Packing Cost (₹):</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={packingCost}
+                    onChange={(e) => setPackingCost(Number(e.target.value))}
+                    className="ml-2 w-24 rounded-md border border-[#d8ded2] bg-white px-2 py-0.5 text-xs font-semibold text-[#20231f] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-[#4e584f]">Order Discount (₹):</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={discount}
+                    onChange={(e) => setDiscount(Number(e.target.value))}
+                    className="ml-2 w-24 rounded-md border border-[#d8ded2] bg-white px-2 py-0.5 text-xs font-semibold text-[#20231f] focus:outline-none"
+                  />
+                </div>
               </div>
               <div className="text-right">
                 <span className="text-[#6b746c]">Subtotal: ₹{subtotal.toLocaleString()}</span>
+                {Number(packingCost) > 0 && (
+                  <span className="ml-3 font-semibold text-[#3f563f]">Packing: +₹{Number(packingCost).toLocaleString()}</span>
+                )}
+                {Number(discount) > 0 && (
+                  <span className="ml-3 font-semibold text-red-600">Discount: -₹{Number(discount).toLocaleString()}</span>
+                )}
                 <span className="ml-3 font-bold text-[#263326]">Final Total: ₹{total.toLocaleString()}</span>
               </div>
             </div>

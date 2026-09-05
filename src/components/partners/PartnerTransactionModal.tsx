@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { createPartnerTransactionAction, updatePartnerTransactionAction } from "@/lib/actions";
 
 interface PartnerTransactionModalProps {
   transaction?: {
-    id: string;
+    id?: string;
     partnerId: string;
     type: any;
     amount: any;
@@ -40,11 +40,34 @@ export function PartnerTransactionModal({
   const [error, setError] = useState("");
   const [selectedPartnerId, setSelectedPartnerId] = useState<string>(transaction?.partnerId || partners[0]?.id || "");
   const [txType, setTxType] = useState<string>(transaction?.type || "ADDITIONAL_INVESTMENT");
-  const [amount, setAmount] = useState<number>(transaction ? Number(transaction.amount) : 1);
+  const [amount, setAmount] = useState<number>(transaction ? Number(transaction.amount) : 0);
+  const [description, setDescription] = useState<string>(transaction?.description || "");
+  const [method, setMethod] = useState<string>(transaction?.method || "BANK_TRANSFER");
+  const [occurredAt, setOccurredAt] = useState<string>(
+    transaction?.occurredAt
+      ? new Date(transaction.occurredAt).toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0]
+  );
+
+  useEffect(() => {
+    if (isOpen) {
+      setError("");
+      setSelectedPartnerId(transaction?.partnerId || partners[0]?.id || "");
+      setTxType(transaction?.type || "ADDITIONAL_INVESTMENT");
+      setAmount(transaction ? Number(transaction.amount) : 0);
+      setDescription(transaction?.description || "");
+      setMethod(transaction?.method || "BANK_TRANSFER");
+      setOccurredAt(
+        transaction?.occurredAt
+          ? new Date(transaction.occurredAt).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0]
+      );
+    }
+  }, [isOpen, transaction, partners]);
 
   if (!isOpen) return null;
 
-  const isEditing = Boolean(transaction);
+  const isEditing = Boolean(transaction && transaction.id);
   const isWithdrawalOrReimburse = txType === "WITHDRAWAL" || txType === "REIMBURSEMENT";
   const currentPartnerBalance = partnerBalances.find((p) => p.id === selectedPartnerId);
   const availableLiquidCash = currentPartnerBalance ? currentPartnerBalance.withdrawableAmount : 0;
@@ -72,13 +95,13 @@ export function PartnerTransactionModal({
       partnerId: (formData.get("partnerId") as string) || selectedPartnerId,
       type: (formData.get("type") as any) || txType,
       amount: Number(formData.get("amount")),
-      description: (formData.get("description") as string) || "",
-      method: (formData.get("method") as any) || undefined,
-      occurredAt: (formData.get("occurredAt") as string) || undefined,
+      description: (formData.get("description") as string) || description,
+      method: (formData.get("method") as any) || method,
+      occurredAt: (formData.get("occurredAt") as string) || occurredAt,
     };
 
     try {
-      const res = isEditing && transaction
+      const res = isEditing && transaction && transaction.id
         ? await updatePartnerTransactionAction(transaction.id, data)
         : await createPartnerTransactionAction(data);
 
@@ -220,7 +243,8 @@ export function PartnerTransactionModal({
               type="text"
               name="description"
               required
-              defaultValue={transaction?.description || ""}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
               placeholder="e.g. Initial capital contribution for machinery"
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
             />
@@ -231,7 +255,8 @@ export function PartnerTransactionModal({
               <label className="block text-xs font-semibold text-[#4e584f]">Method</label>
               <select
                 name="method"
-                defaultValue={transaction?.method || "BANK_TRANSFER"}
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               >
                 <option value="BANK_TRANSFER">Bank Transfer</option>
@@ -247,7 +272,8 @@ export function PartnerTransactionModal({
               <input
                 type="date"
                 name="occurredAt"
-                defaultValue={defaultOccurredAt}
+                value={occurredAt}
+                onChange={(e) => setOccurredAt(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               />
             </div>
