@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Users, Wallet, ArrowUpRight, ArrowDownRight, Shield, UserPlus, Edit, Trash2, ArrowUp, ArrowDown, Loader2, Package } from "lucide-react";
+import { Plus, Users, Wallet, ArrowUpRight, ArrowDownRight, Shield, UserPlus, Edit, Trash2, ArrowUp, ArrowDown, Loader2, Package, Handshake } from "lucide-react";
 import { PartnerTransactionModal } from "./PartnerTransactionModal";
 import { AddPartnerModal } from "./AddPartnerModal";
+import { PartnerPaybackModal } from "./PartnerPaybackModal";
 import { calculateProfitMetrics, calculatePartnerBalances } from "@/lib/profit";
-import { removePartnerUserAction } from "@/lib/actions";
+import { removePartnerUserAction, deletePartnerTransactionAction } from "@/lib/actions";
 
 export function PartnersClient({
   partners,
@@ -25,6 +26,9 @@ export function PartnersClient({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [isAddPartnerOpen, setIsAddPartnerOpen] = useState(false);
+  const [isPaybackModalOpen, setIsPaybackModalOpen] = useState(false);
+  const [paybackPayerId, setPaybackPayerId] = useState<string | undefined>(undefined);
+  const [paybackRecipientId, setPaybackRecipientId] = useState<string | undefined>(undefined);
   const [deactivatingPartnerId, setDeactivatingPartnerId] = useState<string | null>(null);
 
   const { netProfit, totalRevenue, availableCompanyCash, totalCapitalInvested, directPartnerInvestments } = calculateProfitMetrics({
@@ -79,7 +83,18 @@ export function PartnersClient({
             Track capital investments, reimbursements, withdrawals, out-of-pocket business expenses, and real-time withdrawable profit balances.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => {
+              setPaybackPayerId(undefined);
+              setPaybackRecipientId(undefined);
+              setIsPaybackModalOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-950 transition hover:bg-amber-100 shadow-sm"
+          >
+            <Handshake className="size-4 text-amber-800" />
+            Pay Back Partner
+          </button>
           <button
             onClick={() => setIsAddPartnerOpen(true)}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#d8ded2] bg-white px-4 py-2 text-sm font-medium text-[#20231f] transition hover:bg-[#edf1e8] shadow-sm"
@@ -150,32 +165,32 @@ export function PartnersClient({
       {/* Stake & Withdrawable Allocation Formula Banner */}
       <div className="rounded-xl border border-[#d8ded2] bg-[#fcfdfa] p-4 text-xs text-[#5f685e] space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="font-bold text-[#20231f] text-sm">📐 Live Partner Stake & Liquid Withdrawal Formula</span>
+          <span className="font-bold text-[#20231f] text-sm">📐 Equal Partner Stake & Investment Split Settlement Formula</span>
           <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
-            Automated Pro-Rata Math
+            Equal Equity & Split Rules
           </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 text-[11px]">
           <div className="rounded-lg bg-white p-3 border border-[#edf1e8] space-y-1">
-            <span className="font-bold text-blue-900">1. Stake Ownership %</span>
+            <span className="font-bold text-blue-900">1. Equal Stake & Profit Ownership</span>
             <p className="text-[#4e584f]">
-              <code>(Partner Capital / Total Capital Pool) × 100</code>
+              <code>100% / Active Partners Count</code>
             </p>
-            <p className="text-[10px] text-[#6b746c]">Determines dynamic profit share & equity ownership.</p>
+            <p className="text-[10px] text-[#6b746c]">All active partners own equal stake and share profits equally.</p>
           </div>
           <div className="rounded-lg bg-white p-3 border border-[#edf1e8] space-y-1">
-            <span className="font-bold text-purple-900">2. Total Stake Amount (Equity)</span>
+            <span className="font-bold text-purple-900">2. Investment Split Responsibility</span>
             <p className="text-[#4e584f]">
-              <code>Capital Contributed + Profit Share − Withdrawals</code>
+              <code>Total Invested Capital / Active Partners</code>
             </p>
-            <p className="text-[10px] text-[#6b746c]">Total enterprise value owned by this partner.</p>
+            <p className="text-[10px] text-[#6b746c]">Partners who invest less owe their equal split of the total investment.</p>
           </div>
           <div className="rounded-lg bg-white p-3 border border-[#edf1e8] space-y-1">
-            <span className="font-bold text-emerald-900">3. Liquid Cash Withdrawable</span>
+            <span className="font-bold text-emerald-900">3. Settlement via Profit or Cash</span>
             <p className="text-[#4e584f]">
-              <code>Stake % × Available Company Capital</code>
+              <code>Deficit paid from Profit Share or Payments</code>
             </p>
-            <p className="text-[10px] text-[#6b746c]">Immediate cash claimable from available company treasury.</p>
+            <p className="text-[10px] text-[#6b746c]">Profit share pays down investment deficit before cash becomes withdrawable.</p>
           </div>
         </div>
       </div>
@@ -194,6 +209,10 @@ export function PartnersClient({
           const withdrawableAmount = detail ? detail.withdrawableAmount : 0;
           const stockBackedStake = detail ? detail.stockBackedStake : 0;
           const payableAmount = detail ? detail.payableAmount : 0;
+          const investmentDeficit = detail ? detail.investmentDeficit : 0;
+          const investmentSurplus = detail ? detail.investmentSurplus : 0;
+          const profitUsedForSplit = detail ? detail.profitUsedForInvestmentSplit : 0;
+          const remainingDeficit = detail ? detail.remainingInvestmentDeficit : 0;
           const status = detail ? detail.status : "SETTLED";
           const isActive = partner.isActive !== false;
 
@@ -224,7 +243,7 @@ export function PartnersClient({
 
                 <div className="flex items-center gap-1.5">
                   <span className="rounded-full bg-[#edf1e8] px-2.5 py-1 text-xs font-bold text-[#263326] border border-[#d8ded2]">
-                    {stakePercent.toFixed(1)}% Stake
+                    {stakePercent.toFixed(1)}% Equal Stake
                   </span>
                   {isActive && (
                     <button
@@ -247,14 +266,14 @@ export function PartnersClient({
               <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] flex justify-between items-center">
                 <div>
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6b746c]">
-                    Total Stake Amount (Equity)
+                    Total Equity Owned
                   </span>
                   <p className="text-lg font-bold text-[#20231f] mt-0.5">
                     ₹{Math.round(stakeAmount).toLocaleString()}
                   </p>
                 </div>
                 <div className="text-right text-xs">
-                  <span className="text-[#8a948b]">Profit Share</span>
+                  <span className="text-[#8a948b]">Equal Profit Share</span>
                   <p className="font-bold text-blue-900 mt-0.5">
                     +₹{Math.round(allocatedProfit).toLocaleString()}
                   </p>
@@ -272,10 +291,32 @@ export function PartnersClient({
                 </div>
               </div>
 
+              {/* Investment Split Equalization Details */}
+              {isActive && (
+                <div className="rounded-lg bg-[#fcfdfa] p-2.5 border border-[#edf1e8] space-y-1 text-[11px]">
+                  {investmentSurplus > 0.01 ? (
+                    <div className="flex justify-between items-center text-emerald-900">
+                      <span>Over-Invested Surplus:</span>
+                      <span className="font-bold">+₹{Math.round(investmentSurplus).toLocaleString()}</span>
+                    </div>
+                  ) : investmentDeficit > 0.01 ? (
+                    <div className="flex justify-between items-center text-amber-900 font-medium">
+                      <span>Investment Split Deficit:</span>
+                      <span className="font-bold text-rose-900">₹{Math.round(investmentDeficit).toLocaleString()}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center text-emerald-800 text-[10px]">
+                      <span>Investment Split Status:</span>
+                      <span className="font-bold">Fully Equalized</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Live Treasury Withdrawal Breakdown */}
               <div className="rounded-lg bg-emerald-50/50 p-3 border border-emerald-200 space-y-2 text-xs">
                 <div className="flex justify-between items-center">
-                  <span className="font-bold text-emerald-950">Current Liquid Cash Claim</span>
+                  <span className="font-bold text-emerald-950">Withdrawable Cash Claim</span>
                   <span className="font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
                     ₹{Math.round(withdrawableAmount).toLocaleString()}
                   </span>
@@ -288,7 +329,7 @@ export function PartnersClient({
                 )}
                 {payableAmount > 0.01 && (
                   <div className="flex justify-between items-center text-[10px] text-rose-900 pt-1.5 border-t border-rose-200">
-                    <span>⚠️ Deficit to Pay Back:</span>
+                    <span>⚠️ Deficit Owed to Equalize Split:</span>
                     <span className="font-bold">₹{Math.round(payableAmount).toLocaleString()}</span>
                   </div>
                 )}
@@ -305,15 +346,28 @@ export function PartnersClient({
                   >
                     Withdraw Cash
                   </button>
-                  <button
-                    onClick={() => {
-                      setEditingTransaction({ partnerId: partner.id, type: "ADDITIONAL_INVESTMENT", amount: 0, description: "", method: "BANK_TRANSFER", occurredAt: new Date() } as any);
-                      setIsModalOpen(true);
-                    }}
-                    className="flex-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 text-center transition"
-                  >
-                    + Invest Capital
-                  </button>
+                  {investmentDeficit > 0.01 ? (
+                    <button
+                      onClick={() => {
+                        setPaybackPayerId(partner.id);
+                        setPaybackRecipientId(undefined);
+                        setIsPaybackModalOpen(true);
+                      }}
+                      className="flex-1 rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-200 text-center transition shadow-sm"
+                    >
+                      Pay Back Deficit (₹{Math.round(investmentDeficit).toLocaleString()})
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setEditingTransaction({ partnerId: partner.id, type: "ADDITIONAL_INVESTMENT", amount: 0, description: "", method: "BANK_TRANSFER", occurredAt: new Date() } as any);
+                        setIsModalOpen(true);
+                      }}
+                      className="flex-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 text-center transition"
+                    >
+                      + Invest Capital
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -351,7 +405,13 @@ export function PartnersClient({
                       <span className="rounded bg-[#edf1e8] px-2 py-0.5 text-xs font-semibold text-[#3f563f]">
                         {t.type}
                       </span>
-                      {t.method && <span className="ml-2 text-xs text-[#6b746c]">({t.method})</span>}
+                      {t.method === "PROFIT_SHARE" ? (
+                        <span className="ml-2 rounded bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-900 border border-purple-200">
+                          Earned Profit Share
+                        </span>
+                      ) : t.method ? (
+                        <span className="ml-2 text-xs text-[#6b746c]">({t.method})</span>
+                      ) : null}
                     </td>
                     <td className="px-6 py-4 text-xs text-[#4e584f] max-w-xs truncate">
                       {t.description}
@@ -369,13 +429,29 @@ export function PartnersClient({
                       ₹{Number(t.amount).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        title="Edit Transaction"
-                        onClick={() => setEditingTransaction(t)}
-                        className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
-                      >
-                        <Edit className="size-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          title="Edit Transaction"
+                          onClick={() => setEditingTransaction(t)}
+                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                        >
+                          <Edit className="size-4" />
+                        </button>
+                        <button
+                          title="Delete Transaction"
+                          onClick={async () => {
+                            if (confirm(`Are you sure you want to delete this partner transaction of ₹${Number(t.amount).toLocaleString()} (${t.description})?`)) {
+                              const res = await deletePartnerTransactionAction(t.id);
+                              if (res && !res.success) {
+                                alert(res.error || "Failed to delete transaction.");
+                              }
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -399,6 +475,19 @@ export function PartnersClient({
       <AddPartnerModal
         isOpen={isAddPartnerOpen}
         onClose={() => setIsAddPartnerOpen(false)}
+      />
+
+      <PartnerPaybackModal
+        partners={partners}
+        partnerBalances={partnerBalances}
+        isOpen={isPaybackModalOpen}
+        prefillPayerId={paybackPayerId}
+        prefillRecipientId={paybackRecipientId}
+        onClose={() => {
+          setIsPaybackModalOpen(false);
+          setPaybackPayerId(undefined);
+          setPaybackRecipientId(undefined);
+        }}
       />
     </div>
   );

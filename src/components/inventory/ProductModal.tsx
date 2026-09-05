@@ -19,6 +19,7 @@ interface ProductModalProps {
   availableCapital?: number;
   isOpen: boolean;
   onClose: () => void;
+  onDeleteRequest?: (product: any) => void;
 }
 
 export function ProductModal({
@@ -28,6 +29,7 @@ export function ProductModal({
   availableCapital = 0,
   isOpen,
   onClose,
+  onDeleteRequest,
 }: ProductModalProps) {
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -115,28 +117,11 @@ export function ProductModal({
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (!product) return;
-    if (!confirm(`Are you sure you want to permanently delete SKU "${product.sku}" (${product.name})?`)) {
-      return;
-    }
-    setDeleting(true);
-    setError("");
-    try {
-      const res = await deleteProductAction(product.id);
-      if (!res.success) {
-        setError(res.error || "Failed to delete product.");
-        return;
-      }
-      onClose();
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Failed to delete product.");
-      }
-    } finally {
-      setDeleting(false);
+    onClose();
+    if (onDeleteRequest) {
+      onDeleteRequest(product);
     }
   }
 

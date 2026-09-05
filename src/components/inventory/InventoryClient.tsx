@@ -6,6 +6,7 @@ import { ProductModal } from "./ProductModal";
 import { SupplierModal } from "./SupplierModal";
 import { StockAdjustModal } from "./StockAdjustModal";
 import { BundleModal } from "./BundleModal";
+import { DeleteProductModal } from "./DeleteProductModal";
 import { deleteProductBundleAction, deleteProductAction } from "@/lib/actions";
 import { calculateBundlePrice, calculateBundleVirtualStock } from "@/lib/bundles";
 
@@ -31,7 +32,9 @@ export function InventoryClient({
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
   const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
+  const [isDeleteProductModalOpen, setIsDeleteProductModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<any | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<any | null>(null);
   const [selectedBundle, setSelectedBundle] = useState<any | null>(null);
 
@@ -73,13 +76,9 @@ export function InventoryClient({
     setIsProductModalOpen(true);
   }
 
-  async function handleDeleteProduct(product: any) {
-    if (confirm(`Are you sure you want to delete SKU "${product.sku}" (${product.name})?`)) {
-      const res = await deleteProductAction(product.id);
-      if (res && !res.success) {
-        alert(res.error || "Failed to delete product.");
-      }
-    }
+  function handleDeleteProduct(product: any) {
+    setDeletingProduct(product);
+    setIsDeleteProductModalOpen(true);
   }
 
   function handleEditSupplier(supplier: any) {
@@ -585,6 +584,7 @@ export function InventoryClient({
         availableCapital={availableCapital}
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
+        onDeleteRequest={(p) => handleDeleteProduct(p)}
       />
 
       <SupplierModal
@@ -606,6 +606,15 @@ export function InventoryClient({
         products={products}
         isOpen={isBundleModalOpen}
         onClose={() => setIsBundleModalOpen(false)}
+      />
+
+      <DeleteProductModal
+        product={deletingProduct}
+        isOpen={isDeleteProductModalOpen}
+        onClose={() => {
+          setIsDeleteProductModalOpen(false);
+          setDeletingProduct(null);
+        }}
       />
     </div>
   );

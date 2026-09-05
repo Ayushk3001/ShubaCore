@@ -198,6 +198,12 @@ export interface PartnerBalanceDetail {
   totalWithdrawn: number;
   profitSharePercent: number;
   stakePercent: number;
+  equalRequiredInvestment: number;
+  investmentDifference: number;
+  investmentSurplus: number;
+  investmentDeficit: number;
+  profitUsedForInvestmentSplit: number;
+  remainingInvestmentDeficit: number;
   allocatedProfit: number;
   withdrawableProfit: number;
   withdrawableCapital: number;
@@ -256,12 +262,18 @@ export function calculatePartnerBalances({
   const activeCount = activePartners.length;
 
   // A partner's contributed capital = direct investments + business expenses they paid
-  // personally out-of-pocket.
+  // personally out-of-pocket minus any payback reimbursements received.
   const contributionOf = (partnerId: string) => {
     const pTxs = partnerTransactions.filter((t) => t.partnerId === partnerId);
-    const directInvestments = pTxs
+    const rawDirectInvestments = pTxs
       .filter((t) => t.type === "INITIAL_INVESTMENT" || t.type === "ADDITIONAL_INVESTMENT")
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+    const reimbursements = pTxs
+      .filter((t) => t.type === "REIMBURSEMENT")
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+    const directInvestments = Math.max(0, rawDirectInvestments - reimbursements);
 
     const expenseOutlay = expenses
       .filter((e) => e.paidById === partnerId && e.method !== "PARTNER_CAPITAL")
@@ -284,6 +296,9 @@ export function calculatePartnerBalances({
     totalContributedAll += c.directInvestments + c.outOfPocketExpenses;
   });
 
+  // Equal investment required per active partner
+  const equalRequiredInvestment = activeCount > 0 ? totalContributedAll / activeCount : 0;
+
   // Expenses funded from the pooled Partner Capital Fund (method === "PARTNER_CAPITAL").
   const capitalFundExpenses = expenses
     .filter((e) => e.method === "PARTNER_CAPITAL")
@@ -291,9 +306,9 @@ export function calculatePartnerBalances({
 
   const totalProfitAllocated = activeCount > 0 ? netProfit : 0;
 
-  // Business-wide cash outflows to partners (withdrawals / reimbursements)
+  // Business-wide cash withdrawals from company capital treasury
   const totalCashOut = partnerTransactions
-    .filter((t) => t.type === "WITHDRAWAL" || t.type === "REIMBURSEMENT")
+    .filter((t) => t.type === "WITHDRAWAL")
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
   // Cash Inflow & Outflow for Liquid Treasury Capital
@@ -327,7 +342,23 @@ export function calculatePartnerBalances({
     const { directInvestments, outOfPocketExpenses } = contributionOf(partner.id);
     const totalContributed = directInvestments + outOfPocketExpenses;
 
-    // This partner's proportional share of pooled capital-fund spending.
+    // Stake % and Profit Share % are EQUAL for all active partners (100 / N)
+    const stakePercent = isActive && activeCount > 0 ? 100 / activeCount : 0;
+    const profitSharePercent = stakePercent;
+
+    // Equal allocated profit share from net profit
+    const allocatedProfit = isActive && activeCount > 0 ? netProfit / activeCount : 0;
+
+    // Investment deficit / surplus relative to equal required investment share
+    const investmentDifference = isActive ? totalContributed - equalRequiredInvestment : 0;
+    const investmentSurplus = isActive && investmentDifference > 0 ? investmentDifference : 0;
+    const investmentDeficit = isActive && investmentDifference < 0 ? Math.abs(investmentDifference) : 0;
+
+    // Deficits are settled explicitly via the Payback/Settlement option (Profit Share vs Direct Payment)
+    const profitUsedForInvestmentSplit = 0;
+    const remainingInvestmentDeficit = investmentDeficit;
+
+    // Capital expenses deducted
     const capitalExpensesDeducted =
       totalContributedAll > 0 ? (totalContributed / totalContributedAll) * capitalFundExpenses : 0;
 
@@ -336,23 +367,12 @@ export function calculatePartnerBalances({
       .filter((t) => t.type === "WITHDRAWAL" || t.type === "REIMBURSEMENT")
       .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-    // Dynamic Partner Stake % based on exact proportion of capital contributed
-    const stakePercent =
-      isActive && totalContributedAll > 0 
-        ? (totalContributed / totalContributedAll) * 100 
-        : (isActive && activeCount > 0 ? 100 / activeCount : 0);
-    const profitSharePercent = stakePercent;
-
-    // Allocated Profit Share from Net Business Profit
-    const allocatedProfit = isActive ? netProfit * (stakePercent / 100) : 0;
-
     // Capital standing in the business for this partner
     const netCapitalBalance = totalContributed - capitalExpensesDeducted;
 
     // Total Net Stake Amount (Total Equity Owned) = Contributed Capital + Profit Share - Withdrawals
     const netBalance = netCapitalBalance + allocatedProfit - totalWithdrawn;
     const stakeAmount = netBalance;
-    const payableAmount = netBalance < -0.01 ? Math.abs(netBalance) : 0;
 
     // Total positive equity stake
     const positiveEquity = isActive ? Math.max(0, netBalance) : 0;
@@ -366,24 +386,30 @@ export function calculatePartnerBalances({
     // Absolute maximum individual withdrawal bounded by Available Company Capital
     const maxIndividualWithdrawable = Math.min(positiveEquity, availableCompanyCapital);
 
-    // Primary withdrawable amount represents their pro-rata liquid share of company cash
-    const withdrawableAmount = liquidShareWithdrawable > 0 ? liquidShareWithdrawable : maxIndividualWithdrawable;
-    const liquidCashWithdrawable = withdrawableAmount;
+    const rawWithdrawable = liquidShareWithdrawable > 0 ? liquidShareWithdrawable : maxIndividualWithdrawable;
 
-    // Portions of withdrawable cash from profit vs capital
+    // Profit share available for withdrawal
     const withdrawableProfit = isActive && allocatedProfit > 0
-      ? Math.max(0, Math.min(allocatedProfit - totalWithdrawn, withdrawableAmount))
+      ? Math.max(0, Math.min(allocatedProfit - totalWithdrawn, rawWithdrawable))
       : 0;
-    const withdrawableCapital = Math.max(0, withdrawableAmount - withdrawableProfit);
+
+    const withdrawableCapital = isActive
+      ? Math.max(0, Math.min(rawWithdrawable - withdrawableProfit, positiveEquity))
+      : 0;
+
+    const withdrawableAmount = withdrawableProfit + withdrawableCapital;
+    const liquidCashWithdrawable = withdrawableAmount;
 
     // Remaining equity stake preserved in warehouse inventory stock
     const stockBackedStake = Math.max(0, positiveEquity - withdrawableAmount);
     const tiedUpInStock = stockBackedStake;
 
+    const payableAmount = netBalance < -0.01 ? Math.abs(netBalance) : remainingInvestmentDeficit;
+
     let status: "LOCKED_IN_STOCK" | "PARTIALLY_RECOVERED" | "WITHDRAWABLE" | "PAYABLE_TO_COMPANY" | "SETTLED" =
       "SETTLED";
 
-    if (netBalance < -0.01) {
+    if (payableAmount > 0.01 || netBalance < -0.01) {
       status = "PAYABLE_TO_COMPANY";
     } else if (withdrawableAmount > 0.01 && stockBackedStake > 0.01) {
       status = "PARTIALLY_RECOVERED";
@@ -418,6 +444,12 @@ export function calculatePartnerBalances({
       totalWithdrawn: round2(totalWithdrawn),
       profitSharePercent: round2(profitSharePercent),
       stakePercent: round2(stakePercent),
+      equalRequiredInvestment: round2(equalRequiredInvestment),
+      investmentDifference: round2(investmentDifference),
+      investmentSurplus: round2(investmentSurplus),
+      investmentDeficit: round2(investmentDeficit),
+      profitUsedForInvestmentSplit: round2(profitUsedForInvestmentSplit),
+      remainingInvestmentDeficit: round2(remainingInvestmentDeficit),
       allocatedProfit: round2(allocatedProfit),
       withdrawableProfit: round2(withdrawableProfit),
       withdrawableCapital: round2(withdrawableCapital),

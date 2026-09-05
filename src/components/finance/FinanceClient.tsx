@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart, Wallet, ArrowUp, ArrowDown, Trash2 } from "lucide-react";
+import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart, Wallet, ArrowUp, ArrowDown, Trash2, Handshake } from "lucide-react";
 import { PaymentModal } from "./PaymentModal";
 import { ExpenseModal } from "./ExpenseModal";
 import { PartnerTransactionModal } from "@/components/partners/PartnerTransactionModal";
+import { PartnerPaybackModal } from "@/components/partners/PartnerPaybackModal";
 import { deleteExpenseAction } from "@/lib/actions";
 import { calculateProfitMetrics, calculateOrderGrossProfit, calculatePartnerBalances } from "@/lib/profit";
 
@@ -27,6 +28,9 @@ export function FinanceClient({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isPartnerTxModalOpen, setIsPartnerTxModalOpen] = useState(false);
+  const [isPaybackModalOpen, setIsPaybackModalOpen] = useState(false);
+  const [paybackPayerId, setPaybackPayerId] = useState<string | undefined>(undefined);
+  const [paybackRecipientId, setPaybackRecipientId] = useState<string | undefined>(undefined);
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [partnerTxPreFill, setPartnerTxPreFill] = useState<{ partnerId: string; type: string } | null>(null);
@@ -566,11 +570,24 @@ export function FinanceClient({
       {activeTab === "PARTNER_SETTLEMENTS" && (
         <div className="space-y-6">
           <div className="rounded-xl border border-[#d8ded2] bg-white p-6 shadow-sm space-y-6">
-            <div>
-              <h3 className="text-base font-bold text-[#20231f]">Partner Equity, Profit Distribution & Settlements</h3>
-              <p className="text-xs text-[#6b746c] mt-1">
-                Real-time integration of capital contributions, out-of-pocket business expenses paid by partners, allocated profit shares, and net withdrawable funds vs company receivables.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-[#20231f]">Partner Equity, Profit Distribution & Settlements</h3>
+                <p className="text-xs text-[#6b746c] mt-1">
+                  Real-time integration of capital contributions, out-of-pocket business expenses paid by partners, allocated profit shares, and net withdrawable funds vs company receivables.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setPaybackPayerId(undefined);
+                  setPaybackRecipientId(undefined);
+                  setIsPaybackModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100 shadow-sm whitespace-nowrap self-start sm:self-center"
+              >
+                <Handshake className="size-4 text-amber-800" />
+                Pay Back Partner
+              </button>
             </div>
 
             {/* KPI Cards for Partner Financials */}
@@ -607,11 +624,11 @@ export function FinanceClient({
                   <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
                     <tr>
                       <th className="px-5 py-3.5">Partner Account</th>
-                      <th className="px-5 py-3.5">Stake %</th>
+                      <th className="px-5 py-3.5">Equal Stake %</th>
                       <th className="px-5 py-3.5">Capital Injected</th>
-                      <th className="px-5 py-3.5">Profit Share</th>
+                      <th className="px-5 py-3.5">Equal Profit Share</th>
                       <th className="px-5 py-3.5">Total Stake (Equity)</th>
-                      <th className="px-5 py-3.5 text-right">Liquid Cash Claim</th>
+                      <th className="px-5 py-3.5 text-right">Withdrawable Cash Claim</th>
                       <th className="px-5 py-3.5 text-right">Quick Actions</th>
                     </tr>
                   </thead>
@@ -635,15 +652,21 @@ export function FinanceClient({
                         </td>
 
                         <td className="px-5 py-4 text-xs font-bold text-[#263326]">
-                          {p.stakePercent.toFixed(1)}%
+                          {p.stakePercent.toFixed(1)}% Equal
                         </td>
 
                         <td className="px-5 py-4 text-xs font-medium text-[#20231f]">
                           ₹{p.totalContributed.toLocaleString()}
+                          {p.investmentDeficit > 0.01 && (
+                            <p className="text-[10px] text-amber-800">Deficit: ₹{Math.round(p.investmentDeficit).toLocaleString()}</p>
+                          )}
+                          {p.investmentSurplus > 0.01 && (
+                            <p className="text-[10px] text-emerald-800">Surplus: +₹{Math.round(p.investmentSurplus).toLocaleString()}</p>
+                          )}
                         </td>
 
-                        <td className="px-5 py-4 text-xs">
-                          <p className="font-semibold text-blue-900">+₹{Math.round(p.allocatedProfit).toLocaleString()}</p>
+                        <td className="px-5 py-4 text-xs font-semibold text-blue-900">
+                          +₹{Math.round(p.allocatedProfit).toLocaleString()}
                         </td>
 
                         <td className="px-5 py-4 font-bold text-[#20231f]">
@@ -702,16 +725,30 @@ export function FinanceClient({
                               >
                                 Withdraw
                               </button>
-                              <button
-                                title="Record Capital Contribution"
-                                onClick={() => {
-                                  setPartnerTxPreFill({ partnerId: p.id, type: "ADDITIONAL_INVESTMENT" });
-                                  setIsPartnerTxModalOpen(true);
-                                }}
-                                className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
-                              >
-                                + Invest
-                              </button>
+                              {p.remainingInvestmentDeficit > 0.01 ? (
+                                <button
+                                  title="Pay Back Partner Investment Deficit"
+                                  onClick={() => {
+                                    setPaybackPayerId(p.id);
+                                    setPaybackRecipientId(undefined);
+                                    setIsPaybackModalOpen(true);
+                                  }}
+                                  className="rounded border border-amber-300 bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-950 hover:bg-amber-200"
+                                >
+                                  Pay Deficit (₹{Math.round(p.remainingInvestmentDeficit).toLocaleString()})
+                                </button>
+                              ) : (
+                                <button
+                                  title="Record Capital Contribution"
+                                  onClick={() => {
+                                    setPartnerTxPreFill({ partnerId: p.id, type: "ADDITIONAL_INVESTMENT" });
+                                    setIsPartnerTxModalOpen(true);
+                                  }}
+                                  className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                                >
+                                  + Invest
+                                </button>
+                              )}
                             </div>
                           )}
                         </td>
@@ -755,6 +792,19 @@ export function FinanceClient({
         onClose={() => {
           setIsPartnerTxModalOpen(false);
           setPartnerTxPreFill(null);
+        }}
+      />
+
+      <PartnerPaybackModal
+        partners={partners}
+        partnerBalances={partnerBalances}
+        isOpen={isPaybackModalOpen}
+        prefillPayerId={paybackPayerId}
+        prefillRecipientId={paybackRecipientId}
+        onClose={() => {
+          setIsPaybackModalOpen(false);
+          setPaybackPayerId(undefined);
+          setPaybackRecipientId(undefined);
         }}
       />
     </div>

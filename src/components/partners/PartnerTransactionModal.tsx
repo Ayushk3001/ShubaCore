@@ -143,7 +143,7 @@ export function PartnerTransactionModal({
             <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] text-xs space-y-1.5">
               <div className="flex justify-between items-center text-[#20231f]">
                 <span className="font-semibold">
-                  Partner Stake ({currentPartnerBalance.stakePercent.toFixed(1)}% Ownership):
+                  Partner Stake ({currentPartnerBalance.stakePercent.toFixed(1)}% Equal Share):
                 </span>
                 <span className="font-bold">₹{Math.round(currentPartnerBalance.stakeAmount).toLocaleString("en-IN")}</span>
               </div>

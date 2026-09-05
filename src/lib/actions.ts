@@ -1128,7 +1128,7 @@ export async function deleteExpenseAction(id: string) {
 
       // If this expense had a mirrored partner transaction (EXPENSE_PAID), delete it as well
       if (expense.paidById && expense.method !== "PARTNER_CAPITAL") {
-        const partnerTx = await tx.partnerTransaction.findFirst({
+        let partnerTx = await tx.partnerTransaction.findFirst({
           where: {
             partnerId: expense.paidById,
             type: "EXPENSE_PAID",
@@ -1136,6 +1136,18 @@ export async function deleteExpenseAction(id: string) {
             description: expense.description,
           },
         });
+
+        if (!partnerTx) {
+          // Fallback match by partnerId, type EXPENSE_PAID, and exact amount
+          partnerTx = await tx.partnerTransaction.findFirst({
+            where: {
+              partnerId: expense.paidById,
+              type: "EXPENSE_PAID",
+              amount: expense.amount,
+            },
+          });
+        }
+
         if (partnerTx) {
           await tx.partnerTransaction.delete({ where: { id: partnerTx.id } });
         }
@@ -1289,6 +1301,199 @@ export async function updatePartnerTransactionAction(id: string, formData: unkno
     return { success: true as const, transaction: serializeData(transaction) };
   } catch (err) {
     return formatError(err, "Failed to update partner transaction.");
+  }
+}
+
+export async function deletePartnerTransactionAction(id: string) {
+  try {
+    const user = await requireUser();
+    if (!canManagePartnerTransactions(user)) {
+      return { success: false, error: "Not authorized to delete partner transactions." };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const transaction = await tx.partnerTransaction.findUniqueOrThrow({ where: { id } });
+
+      // If this was an EXPENSE_PAID transaction, optionally clean up matching mirrored Expense if present
+      if (transaction.type === "EXPENSE_PAID" && transaction.partnerId) {
+        const matchingExpense = await tx.expense.findFirst({
+          where: {
+            paidById: transaction.partnerId,
+            amount: transaction.amount,
+          },
+        });
+        if (matchingExpense) {
+          await tx.expense.delete({ where: { id: matchingExpense.id } });
+        }
+      }
+
+      await tx.partnerTransaction.delete({ where: { id } });
+
+      await logAudit({
+        actorId: user.id,
+        action: "DELETE_PARTNER_TRANSACTION",
+        entityType: "PartnerTransaction",
+        entityId: id,
+        metadata: {
+          description: transaction.description,
+          amount: Number(transaction.amount),
+          type: transaction.type,
+          partnerId: transaction.partnerId,
+        },
+        tx,
+      });
+
+      return transaction;
+    });
+
+    revalidatePath("/partners");
+    revalidatePath("/finance");
+    revalidatePath("/dashboard");
+    revalidatePath("/reports");
+    return { success: true as const, id: result.id };
+  } catch (err) {
+    return formatError(err, "Failed to delete partner transaction.");
+  }
+}
+
+export async function createPartnerPaybackAction(formData: unknown) {
+  try {
+    const user = await requireUser();
+    if (!canManagePartnerTransactions(user)) {
+      return { success: false, error: "Not authorized." };
+    }
+
+    const payload = formData as {
+      payerPartnerId: string;
+      recipientPartnerId: string;
+      amount: number;
+      profitUsed?: number;
+      directPaymentAmount?: number;
+      settlementSource?: "FULL_DIRECT" | "PROFIT_PLUS_DIRECT" | "CUSTOM_SPLIT" | "PROFIT_SHARE" | "PAYMENT";
+      description?: string;
+      method?: string;
+      occurredAt?: string;
+    };
+
+    const totalAmount = Number(payload.amount);
+    if (!payload.payerPartnerId || !payload.recipientPartnerId) {
+      return { success: false, error: "Both Payer and Recipient partners are required." };
+    }
+    if (payload.payerPartnerId === payload.recipientPartnerId) {
+      return { success: false, error: "Payer and Recipient cannot be the same partner." };
+    }
+    if (!totalAmount || totalAmount <= 0) {
+      return { success: false, error: "Please provide a valid payback amount greater than 0." };
+    }
+
+    const profitUsed = Math.max(0, Number(payload.profitUsed || 0));
+    const directPayment = Math.max(0, Number(payload.directPaymentAmount ?? (totalAmount - profitUsed)));
+
+    if (Math.abs((profitUsed + directPayment) - totalAmount) > 0.01) {
+      return { success: false, error: "Profit used + direct payment must equal the total settlement amount." };
+    }
+
+    const [payerUser, recipientUser] = await Promise.all([
+      prisma.user.findUnique({ where: { id: payload.payerPartnerId } }),
+      prisma.user.findUnique({ where: { id: payload.recipientPartnerId } }),
+    ]);
+
+    if (!payerUser || !recipientUser) {
+      return { success: false, error: "Selected partner users not found." };
+    }
+
+    const occurredDate = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
+    const customDesc = payload.description?.trim();
+
+    let breakdownStr = "";
+    if (profitUsed > 0 && directPayment > 0) {
+      breakdownStr = ` (Breakdown: 💰 Profit: ₹${profitUsed.toLocaleString("en-IN")} | 💳 Direct: ₹${directPayment.toLocaleString("en-IN")})`;
+    } else if (profitUsed > 0 && directPayment === 0) {
+      breakdownStr = ` (via Earned Profit Share)`;
+    } else if (profitUsed === 0 && directPayment > 0) {
+      breakdownStr = ` (via Direct Payment)`;
+    }
+
+    const payerDesc = customDesc || `Payback investment split to ${recipientUser.name}${breakdownStr}`;
+    const recipientDesc = customDesc
+      ? `${customDesc} (Received from ${payerUser.name}${breakdownStr})`
+      : `Investment split payback received from ${payerUser.name}${breakdownStr}`;
+
+    const paymentMethod = profitUsed > 0 && directPayment === 0
+      ? "PROFIT_SHARE"
+      : (payload.method || "BANK_TRANSFER");
+
+    const createdTxns = await prisma.$transaction(async (tx) => {
+      // 1. Payer capital investment (+totalAmount)
+      const pTx = await tx.partnerTransaction.create({
+        data: {
+          partnerId: payload.payerPartnerId,
+          type: "ADDITIONAL_INVESTMENT",
+          amount: new Decimal(totalAmount),
+          description: payerDesc,
+          method: paymentMethod as any,
+          occurredAt: occurredDate,
+          createdById: user.id,
+        },
+      });
+
+      // 2. Recipient reimbursement (-totalAmount)
+      const rTx = await tx.partnerTransaction.create({
+        data: {
+          partnerId: payload.recipientPartnerId,
+          type: "REIMBURSEMENT",
+          amount: new Decimal(totalAmount),
+          description: recipientDesc,
+          method: paymentMethod as any,
+          occurredAt: occurredDate,
+          createdById: user.id,
+        },
+      });
+
+      // 3. If profit share was used by Payer, record a WITHDRAWAL of profitUsed to deduct from claimable profit share
+      let profitTx = null;
+      if (profitUsed > 0.01) {
+        profitTx = await tx.partnerTransaction.create({
+          data: {
+            partnerId: payload.payerPartnerId,
+            type: "WITHDRAWAL",
+            amount: new Decimal(profitUsed),
+            description: `Profit share reinvested for investment payback to ${recipientUser.name}`,
+            method: "PROFIT_SHARE" as any,
+            occurredAt: occurredDate,
+            createdById: user.id,
+          },
+        });
+      }
+
+      await logAudit({
+        actorId: user.id,
+        action: "RECORD_PARTNER_PAYBACK",
+        entityType: "PartnerTransaction",
+        entityId: pTx.id,
+        metadata: {
+          totalSettlement: totalAmount,
+          profitUsed,
+          directPaymentAmount: directPayment,
+          payerPartnerId: payload.payerPartnerId,
+          recipientPartnerId: payload.recipientPartnerId,
+        },
+        tx,
+      });
+
+      return { pTx, rTx, profitTx };
+    });
+
+    revalidatePath("/partners");
+    revalidatePath("/finance");
+    revalidatePath("/dashboard");
+    return {
+      success: true as const,
+      payerTransaction: serializeData(createdTxns.pTx),
+      recipientTransaction: serializeData(createdTxns.rTx),
+    };
+  } catch (err) {
+    return formatError(err, "Failed to record partner payback transaction.");
   }
 }
 
@@ -1534,6 +1739,19 @@ export async function createProductAction(formData: unknown) {
         },
       });
 
+      // Record initial stock movement
+      if (parsed.currentStock > 0) {
+        await tx.stockMovement.create({
+          data: {
+            productId: newProduct.id,
+            type: "PURCHASE",
+            quantity: parsed.currentStock,
+            reference: `Initial stock for ${newProduct.name} (${newProduct.sku})`,
+            createdById: user.id,
+          },
+        });
+      }
+
       if (parsed.currentStock > 0 && parsed.fundingSource && parsed.fundingSource !== "NONE") {
         const totalAmount = new Decimal(parsed.purchaseCost).mul(parsed.currentStock);
         if (totalAmount.greaterThan(0)) {
@@ -1541,14 +1759,14 @@ export async function createProductAction(formData: unknown) {
           const fundingPartnerId = isCompanyProfit ? null : (parsed.fundingPartnerId || user.id);
           const fundingMethod = isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI");
 
+          const itemDesc = `Initial stock procurement for ${newProduct.name} (${parsed.currentStock} ${newProduct.unit}) [ProductID: ${newProduct.id}]`;
+
           await tx.expense.create({
             data: {
               category: "MATERIALS",
               type: "INVENTORY_PURCHASE",
               amount: totalAmount,
-              description: `Initial stock for ${newProduct.name} (${newProduct.sku}) - ${parsed.currentStock} ${newProduct.unit} (${
-                isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
-              })`,
+              description: itemDesc,
               paidById: fundingPartnerId,
               method: fundingMethod,
               expenseDate: new Date(),
@@ -1564,7 +1782,7 @@ export async function createProductAction(formData: unknown) {
                   partnerId: partnerUser.id,
                   type: "EXPENSE_PAID",
                   amount: totalAmount,
-                  description: `Initial stock procurement for ${newProduct.name} (${parsed.currentStock} ${newProduct.unit})`,
+                  description: itemDesc,
                   method: fundingMethod,
                   occurredAt: new Date(),
                   createdById: user.id,
@@ -1626,7 +1844,7 @@ export async function updateProductAction(id: string, formData: unknown) {
               amount: totalAmount,
               description: `Stock procurement for ${parsed.name} (${parsed.sku}) - +${stockDelta} ${parsed.unit} (${
                 isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
-              })`,
+              }) [ProductID: ${id}]`,
               paidById: fundingPartnerId,
               method: fundingMethod,
               expenseDate: new Date(),
@@ -1642,7 +1860,7 @@ export async function updateProductAction(id: string, formData: unknown) {
                   partnerId: partnerUser.id,
                   type: "EXPENSE_PAID",
                   amount: totalAmount,
-                  description: `Stock procurement for ${parsed.name} (+${stockDelta} ${parsed.unit})`,
+                  description: `Stock procurement for ${parsed.name} (+${stockDelta} ${parsed.unit}) [ProductID: ${id}]`,
                   method: fundingMethod,
                   occurredAt: new Date(),
                   createdById: user.id,
@@ -1706,36 +1924,109 @@ export async function deleteProductAction(id: string) {
   try {
     const user = await requireUser();
 
-    // Check if product is attached to any orders
+    // 1. Check if product is attached to any orders
     const orderCount = await prisma.orderItem.count({ where: { productId: id } });
     if (orderCount > 0) {
       return {
         success: false,
-        error: `Cannot delete product because it is linked to ${orderCount} order item(s). You can edit it and set stock to 0 instead.`,
+        error: `This product has financial or inventory activity (linked to ${orderCount} order item(s)) and cannot be completely undone. Please resolve or reverse its transactions first.`,
       };
     }
 
-    // Check if product is attached to any bundles
+    // 2. Check if product is attached to any bundles
     const bundleCount = await prisma.bundleItem.count({ where: { productId: id } });
     if (bundleCount > 0) {
       return {
         success: false,
-        error: `Cannot delete product because it is used in ${bundleCount} product combo bundle(s). Please remove it from the bundles first.`,
+        error: `This product is used in ${bundleCount} product combo bundle(s) and cannot be completely undone. Please remove it from the bundles first.`,
       };
     }
 
-    const deleted = await prisma.$transaction(async (tx) => {
+    // 3. Check if product has non-initial stock movements (e.g. SALE_CONSUMPTION, RETURN, ADJUSTMENT)
+    const nonInitialMovements = await prisma.stockMovement.count({
+      where: {
+        productId: id,
+        type: { not: "PURCHASE" },
+      },
+    });
+
+    if (nonInitialMovements > 0) {
+      return {
+        success: false,
+        error: `This product has ${nonInitialMovements} stock movement(s) beyond initial creation and cannot be completely undone.`,
+      };
+    }
+
+    // Execute atomic transaction for Product Deletion & Financial UNDO
+    const result = await prisma.$transaction(async (tx) => {
+      // Find product
+      const product = await tx.product.findUnique({ where: { id } });
+      if (!product) {
+        throw new Error("Product not found or already deleted.");
+      }
+
+      // Find linked initial stock expense(s) for this product
+      const linkedExpenses = await tx.expense.findMany({
+        where: {
+          type: "INVENTORY_PURCHASE",
+          OR: [
+            { description: { contains: `[ProductID: ${id}]` } },
+            { description: { contains: `Initial stock for ${product.name}` } },
+            { description: { contains: `Initial stock procurement for ${product.name}` } },
+            { description: { contains: `(${product.sku})` } },
+          ],
+        },
+      });
+
+      let totalRestoredAmount = 0;
+
+      for (const expense of linkedExpenses) {
+        totalRestoredAmount += Number(expense.amount);
+
+        // If this expense had a mirrored partner transaction, find and delete it
+        if (expense.paidById) {
+          const partnerTx = await tx.partnerTransaction.findFirst({
+            where: {
+              partnerId: expense.paidById,
+              type: "EXPENSE_PAID",
+              amount: expense.amount,
+            },
+          });
+          if (partnerTx) {
+            await tx.partnerTransaction.delete({ where: { id: partnerTx.id } });
+          }
+        }
+
+        // Delete the expense (restores Company Capital & Cash by +expense.amount)
+        await tx.expense.delete({ where: { id: expense.id } });
+      }
+
+      // Delete initial stock movements for this product
       await tx.stockMovement.deleteMany({ where: { productId: id } });
-      const p = await tx.product.delete({ where: { id } });
+
+      // Delete the product record
+      await tx.product.delete({ where: { id } });
+
       await logAudit({
         actorId: user.id,
-        action: "DELETE_PRODUCT",
+        action: "DELETE_PRODUCT_UNDO",
         entityType: "Product",
         entityId: id,
-        metadata: { name: p.name, sku: p.sku },
+        metadata: {
+          name: product.name,
+          sku: product.sku,
+          restoredAmount: totalRestoredAmount,
+          initialStock: product.currentStock,
+        },
         tx,
       });
-      return p;
+
+      return {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        restoredAmount: totalRestoredAmount,
+      };
     });
 
     revalidatePath("/inventory");
@@ -1743,9 +2034,16 @@ export async function deleteProductAction(id: string) {
     revalidatePath("/partners");
     revalidatePath("/reports");
     revalidatePath("/dashboard");
-    return { success: true as const, id: deleted.id };
+
+    return {
+      success: true as const,
+      id: result.id,
+      name: result.name,
+      sku: result.sku,
+      restoredAmount: result.restoredAmount,
+    };
   } catch (err) {
-    return formatError(err, "Failed to delete product.");
+    return formatError(err, "Failed to delete and undo product creation.");
   }
 }
 
