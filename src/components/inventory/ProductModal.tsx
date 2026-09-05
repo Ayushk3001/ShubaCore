@@ -208,10 +208,14 @@ export function ProductModal({
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               >
                 <option value="pcs">Pieces (pcs)</option>
-                <option value="sets">Sets</option>
-                <option value="boxes">Boxes</option>
+                <option value="grams">Grams (g / grams)</option>
                 <option value="kg">Kilograms (kg)</option>
-                <option value="meters">Meters</option>
+                <option value="packets">Packets (pkts)</option>
+                <option value="boxes">Boxes</option>
+                <option value="sets">Sets</option>
+                <option value="meters">Meters (m)</option>
+                <option value="liters">Liters (L)</option>
+                <option value="ml">Milliliters (ml)</option>
               </select>
             </div>
           </div>
