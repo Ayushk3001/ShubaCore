@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart, Wallet, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, CreditCard, Receipt, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, Edit, Package, ShieldCheck, PieChart, Wallet, ArrowUp, ArrowDown, Trash2 } from "lucide-react";
 import { PaymentModal } from "./PaymentModal";
 import { ExpenseModal } from "./ExpenseModal";
 import { PartnerTransactionModal } from "@/components/partners/PartnerTransactionModal";
+import { deleteExpenseAction } from "@/lib/actions";
 import { calculateProfitMetrics, calculateOrderGrossProfit, calculatePartnerBalances } from "@/lib/profit";
 
 export function FinanceClient({
@@ -51,7 +52,12 @@ export function FinanceClient({
     totalCapitalInvested,
     unrecoveredCapitalBalance,
     capitalRecoveredPercent,
-  } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
+    availableCompanyCash,
+    totalCompanyAssets,
+    directPartnerInvestments,
+    totalCashInflow,
+    totalCashOutflow,
+  } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products, payments });
 
   const {
     partnerBalances,
@@ -62,7 +68,10 @@ export function FinanceClient({
     totalLiquidCashWithdrawable,
     totalTiedUpInStock,
     totalPayableToCompany,
-  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue });
+    availableCompanyCapital,
+  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue, payments });
+
+  const liquidCapital = availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash;
 
   return (
     <div className="space-y-6">
@@ -70,7 +79,7 @@ export function FinanceClient({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#20231f]">Finance & Cashflow</h1>
           <p className="mt-1 text-sm text-[#6b746c]">
-            Asset-backed inventory valuation, OpEx vs CapEx separation, real-time COGS, partner settlements & withdrawable balance matrix.
+            Real-time tracking of company liquid capital, revenue, OpEx vs CapEx, inventory valuation, and partner withdrawable equity.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -98,7 +107,18 @@ export function FinanceClient({
       </div>
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-5 shadow-sm">
+          <div className="flex items-center justify-between text-emerald-950">
+            <span className="text-xs font-semibold uppercase tracking-wider">Company Capital & Cash</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-200 text-emerald-900">
+              <Wallet className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-emerald-950">₹{liquidCapital.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-emerald-800">Usable for inventory & withdrawals</p>
+        </div>
+
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between text-[#6b746c]">
             <span className="text-xs font-semibold uppercase tracking-wider">Gross Revenue Collected</span>
@@ -112,7 +132,7 @@ export function FinanceClient({
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between text-[#6b746c]">
-            <span className="text-xs font-semibold uppercase tracking-wider">Inventory Asset Valuation</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Inventory Valuation</span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-amber-100 text-amber-800">
               <Package className="size-4" />
             </div>
@@ -123,7 +143,7 @@ export function FinanceClient({
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between text-[#6b746c]">
-            <span className="text-xs font-semibold uppercase tracking-wider">Operating Overhead (OpEx)</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Operating Overhead</span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-rose-100 text-rose-800">
               <ArrowDownRight className="size-4" />
             </div>
@@ -321,13 +341,29 @@ export function FinanceClient({
                           ₹{Number(e.amount).toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            title="Edit Expense"
-                            onClick={() => setEditingExpense(e)}
-                            className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
-                          >
-                            <Edit className="size-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              title="Edit Expense"
+                              onClick={() => setEditingExpense(e)}
+                              className="inline-flex items-center rounded-md p-1.5 text-[#3f563f] hover:bg-[#edf1e8]"
+                            >
+                              <Edit className="size-4" />
+                            </button>
+                            <button
+                              title="Delete Expense"
+                              onClick={async () => {
+                                if (confirm(`Are you sure you want to delete this expense of ₹${Number(e.amount).toLocaleString()} (${e.description})?`)) {
+                                  const res = await deleteExpenseAction(e.id);
+                                  if (res && !res.success) {
+                                    alert(res.error || "Failed to delete expense.");
+                                  }
+                                }
+                              }}
+                              className="inline-flex items-center rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -401,35 +437,96 @@ export function FinanceClient({
       {activeTab === "CAPITAL_RECOVERY" && (
         <div className="rounded-xl border border-[#d8ded2] bg-white p-6 shadow-sm space-y-6">
           <div>
-            <h3 className="text-base font-bold text-[#20231f]">Capital Investment & Profit Recovery Dashboard</h3>
+            <h3 className="text-base font-bold text-[#20231f]">Company Capital, Treasury & Recovery Dashboard</h3>
             <p className="text-xs text-[#6b746c] mt-0.5">
-              Tracks partner capital investments, profit earned to recover that capital, remaining balance to recoup, and physical stock assets. Dynamically updates as you invest more or reinvest profits.
+              Comprehensive overview of partner invested capital, collected sales revenue, company liquid treasury funds, and physical warehouse inventory assets.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50/80 p-4">
+              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wider">Liquid Company Cash</span>
+              <p className="mt-2 text-2xl font-bold text-emerald-950">₹{liquidCapital.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-emerald-800">Usable for inventory or withdrawals</p>
+            </div>
+
             <div className="rounded-lg border border-[#d8ded2] bg-[#f8faf6] p-4">
               <span className="text-xs font-bold text-[#4e584f] uppercase tracking-wider">Total Capital Invested</span>
               <p className="mt-2 text-2xl font-bold text-[#20231f]">₹{totalCapitalInvested.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-[#6b746c]">All partner capital injected</p>
-            </div>
-
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
-              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wider">Profit Recovered (Realized)</span>
-              <p className="mt-2 text-2xl font-bold text-emerald-950">₹{netProfit.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-emerald-800">Net profit earned from business sales</p>
-            </div>
-
-            <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4">
-              <span className="text-xs font-bold text-amber-950 uppercase tracking-wider">Remaining to Recoup</span>
-              <p className="mt-2 text-2xl font-bold text-amber-950">₹{unrecoveredCapitalBalance.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-amber-800">Needed from future profits to recover capital</p>
+              <p className="mt-1 text-[11px] text-[#6b746c]">Partner capital injected</p>
             </div>
 
             <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-4">
-              <span className="text-xs font-bold text-blue-950 uppercase tracking-wider">Warehouse Stock Assets</span>
-              <p className="mt-2 text-2xl font-bold text-blue-950">₹{inventoryAssetValuation.toLocaleString()}</p>
-              <p className="mt-1 text-[11px] text-blue-800">Physical stock backing your capital</p>
+              <span className="text-xs font-bold text-blue-950 uppercase tracking-wider">Realized Net Profit</span>
+              <p className="mt-2 text-2xl font-bold text-blue-950">₹{netProfit.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-blue-800">Net profit from sales</p>
+            </div>
+
+            <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4">
+              <span className="text-xs font-bold text-amber-950 uppercase tracking-wider">Warehouse Stock Assets</span>
+              <p className="mt-2 text-2xl font-bold text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-amber-800">Physical product value</p>
+            </div>
+
+            <div className="rounded-lg border border-purple-200 bg-purple-50/70 p-4">
+              <span className="text-xs font-bold text-purple-950 uppercase tracking-wider">Total Company Assets</span>
+              <p className="mt-2 text-2xl font-bold text-purple-950">₹{totalCompanyAssets.toLocaleString()}</p>
+              <p className="mt-1 text-[11px] text-purple-800">Liquid cash + physical stock</p>
+            </div>
+          </div>
+
+          {/* Treasury Cash Flow Balance Sheet */}
+          <div className="rounded-xl border border-[#d8ded2] bg-[#fcfdfa] p-5 space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-[#263326]">
+              Company Capital & Liquid Cash Flow Breakdown
+            </h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="space-y-2 rounded-lg border border-[#edf1e8] bg-white p-4">
+                <p className="font-bold text-[#20231f] border-b border-[#edf1e8] pb-1.5">Cash Inflows (Money In)</p>
+                <div className="flex justify-between items-center text-[#4e584f]">
+                  <span>(+) Total Partner Capital Injected:</span>
+                  <span className="font-semibold text-emerald-900">₹{totalCapitalInvested.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-[#4e584f]">
+                  <span>(+) Gross Revenue Collected from Sales:</span>
+                  <span className="font-semibold text-emerald-900">₹{totalIncome.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-[#edf1e8] pt-1.5 font-bold text-[#20231f]">
+                  <span>Total Inflows Received:</span>
+                  <span className="text-emerald-950">₹{totalCashInflow.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-[#edf1e8] bg-white p-4">
+                <p className="font-bold text-[#20231f] border-b border-[#edf1e8] pb-1.5">Cash Outflows (Money Out)</p>
+                <div className="flex justify-between items-center text-[#4e584f]">
+                  <span>(-) Company Operating & Stock Expenses:</span>
+                  <span className="font-semibold text-rose-800">₹{totalAllExpenses.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-[#4e584f]">
+                  <span>(-) Partner Withdrawals & Reimbursements:</span>
+                  <span className="font-semibold text-rose-800">₹{totalPartnerWithdrawn.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-[#edf1e8] pt-1.5 font-bold text-[#20231f]">
+                  <span>Total Outflows Paid:</span>
+                  <span className="text-rose-950">₹{totalCashOutflow.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-emerald-50 p-4 border border-emerald-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+              <div>
+                <span className="font-bold text-emerald-950 text-sm">
+                  Available Liquid Company Capital: ₹{liquidCapital.toLocaleString()}
+                </span>
+                <p className="text-[11px] text-emerald-800 mt-0.5">
+                  This liquid cash is sitting in your company accounts and is 100% available to purchase stock/inventory or execute partner withdrawals.
+                </p>
+              </div>
+              <span className="rounded-md bg-emerald-200 px-3 py-1 font-bold text-emerald-900 whitespace-nowrap">
+                Ready to Deploy
+              </span>
             </div>
           </div>
 
@@ -462,28 +559,6 @@ export function FinanceClient({
                 🟡 <strong>₹{unrecoveredCapitalBalance.toLocaleString()}</strong> Remaining to Recoup (Covered by ₹{inventoryAssetValuation.toLocaleString()} Warehouse Stock)
               </span>
             </div>
-          </div>
-
-          {/* Dynamic Reinvestment & Recovery Analysis */}
-          <div className="rounded-lg border border-[#d8ded2] bg-[#fdfdfc] p-4 text-xs text-[#5f685e] space-y-2">
-            <p className="font-bold text-[#20231f]">Dynamic Reinvestment & Recovery Logic:</p>
-            <ul className="list-disc list-inside space-y-1.5 text-[11px] text-[#4e584f]">
-              <li>
-                <strong>Capital Contributed:</strong> You currently have <strong>₹{totalCapitalInvested.toLocaleString()}</strong> invested by partners. As you inject more investment in the future, this capital base updates dynamically.
-              </li>
-              <li>
-                <strong>Profit-Based Recovery:</strong> The business has generated <strong>₹{netProfit.toLocaleString()} in net profit</strong> so far (<strong>{capitalRecoveredPercent}% of capital recovered</strong>).
-              </li>
-              <li>
-                <strong>Remaining to Recoup:</strong> You need <strong>₹{unrecoveredCapitalBalance.toLocaleString()} in future net profits</strong> to fully recoup your invested capital.
-              </li>
-              <li>
-                <strong>Warehouse Asset Cushion:</strong> Your warehouse holds <strong>₹{inventoryAssetValuation.toLocaleString()} in physical products</strong>. When you sell those products and generate more profit, the recovery meter automatically moves forward.
-              </li>
-              <li>
-                <strong>Reinvestment:</strong> From the ₹{totalRevenue.toLocaleString()} sales revenue, ₹{(totalRevenue - netProfit).toLocaleString()} was reinvested to restock inventory, ensuring continuous operational growth.
-              </li>
-            </ul>
           </div>
         </div>
       )}
@@ -532,12 +607,11 @@ export function FinanceClient({
                   <thead className="border-b border-[#edf1e8] bg-[#f8faf6] text-xs font-semibold uppercase tracking-wider text-[#5f685e]">
                     <tr>
                       <th className="px-5 py-3.5">Partner Account</th>
-                      <th className="px-5 py-3.5">Capital Invested</th>
-                      <th className="px-5 py-3.5">Out-of-pocket Paid</th>
-                      <th className="px-5 py-3.5">Total Contributed</th>
-                      <th className="px-5 py-3.5">Total Withdrawn</th>
+                      <th className="px-5 py-3.5">Stake %</th>
+                      <th className="px-5 py-3.5">Capital Injected</th>
                       <th className="px-5 py-3.5">Profit Share</th>
-                      <th className="px-5 py-3.5 text-right">Net Settlement Balance</th>
+                      <th className="px-5 py-3.5">Total Stake (Equity)</th>
+                      <th className="px-5 py-3.5 text-right">Liquid Cash Claim</th>
                       <th className="px-5 py-3.5 text-right">Quick Actions</th>
                     </tr>
                   </thead>
@@ -560,55 +634,43 @@ export function FinanceClient({
                           {p.email && <p className="text-xs text-[#6b746c] mt-0.5">{p.email}</p>}
                         </td>
 
+                        <td className="px-5 py-4 text-xs font-bold text-[#263326]">
+                          {p.stakePercent.toFixed(1)}%
+                        </td>
+
                         <td className="px-5 py-4 text-xs font-medium text-[#20231f]">
-                          ₹{p.directInvestments.toLocaleString()}
-                        </td>
-
-                        <td className="px-5 py-4 text-xs font-medium text-[#3f563f]">
-                          ₹{p.outOfPocketExpenses.toLocaleString()}
-                        </td>
-
-                        <td className="px-5 py-4 font-bold text-emerald-900">
                           ₹{p.totalContributed.toLocaleString()}
                         </td>
 
-                        <td className="px-5 py-4 font-bold text-rose-800">
-                          ₹{p.totalWithdrawn.toLocaleString()}
+                        <td className="px-5 py-4 text-xs">
+                          <p className="font-semibold text-blue-900">+₹{Math.round(p.allocatedProfit).toLocaleString()}</p>
                         </td>
 
-                        <td className="px-5 py-4 text-xs">
-                          <p className="font-semibold text-blue-900">₹{Math.round(p.allocatedProfit).toLocaleString()}</p>
-                          <p className="text-[10px] text-[#6b746c]">({p.profitSharePercent.toFixed(1)}% split)</p>
+                        <td className="px-5 py-4 font-bold text-[#20231f]">
+                          ₹{Math.round(p.stakeAmount).toLocaleString()}
                         </td>
 
                         <td className="px-5 py-4 text-right">
+                          {(p.status === "WITHDRAWABLE" || p.status === "PARTIALLY_RECOVERED") && (
+                            <div className="inline-flex flex-col items-end">
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-900 border border-emerald-300">
+                                <ArrowUp className="size-3" />
+                                ₹{Math.round(p.withdrawableAmount).toLocaleString()} Cash
+                              </span>
+                              {p.stockBackedStake > 0.01 && (
+                                <span className="text-[10px] text-amber-900 mt-0.5 font-medium">
+                                  + ₹{Math.round(p.stockBackedStake).toLocaleString()} in warehouse stock
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {p.status === "LOCKED_IN_STOCK" && (
                             <div className="inline-flex flex-col items-end">
                               <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-950 border border-amber-300">
                                 <Package className="size-3 text-amber-800" />
-                                ₹{Math.round(p.tiedUpInStock).toLocaleString()} Tied in Stock
+                                ₹{Math.round(p.stockBackedStake).toLocaleString()} in Stock
                               </span>
-                              <span className="text-[10px] text-amber-800 mt-0.5">Cash Profit: ₹0</span>
-                            </div>
-                          )}
-                          {p.status === "PARTIALLY_RECOVERED" && (
-                            <div className="inline-flex flex-col items-end">
-                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-900 border border-emerald-300">
-                                <ArrowUp className="size-3" />
-                                Can Withdraw ₹{Math.round(p.liquidCashWithdrawable).toLocaleString()}
-                              </span>
-                              <span className="text-[10px] text-[#6b746c] mt-0.5">
-                                ₹{Math.round(p.allocatedProfit)} profit | ₹{Math.round(p.tiedUpInStock)} in warehouse stock
-                              </span>
-                            </div>
-                          )}
-                          {p.status === "WITHDRAWABLE" && (
-                            <div className="inline-flex flex-col items-end">
-                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-900 border border-emerald-300">
-                                <ArrowUp className="size-3" />
-                                Can Withdraw ₹{Math.round(p.liquidCashWithdrawable).toLocaleString()}
-                              </span>
-                              <span className="text-[10px] text-emerald-700 mt-0.5">Fully recovered payout</span>
+                              <span className="text-[10px] text-amber-800 mt-0.5">Backed by physical inventory</span>
                             </div>
                           )}
                           {p.status === "PAYABLE_TO_COMPANY" && (
@@ -677,6 +739,7 @@ export function FinanceClient({
         expense={editingExpense}
         orders={orders}
         partners={partners}
+        availableCapital={availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash}
         isOpen={isExpenseModalOpen || Boolean(editingExpense)}
         onClose={() => {
           setIsExpenseModalOpen(false);
@@ -686,6 +749,7 @@ export function FinanceClient({
 
       <PartnerTransactionModal
         partners={partners}
+        partnerBalances={partnerBalances}
         isOpen={isPartnerTxModalOpen}
         transaction={partnerTxPreFill ? ({ partnerId: partnerTxPreFill.partnerId, type: partnerTxPreFill.type, amount: 0, description: "", method: "BANK_TRANSFER", occurredAt: new Date() } as any) : null}
         onClose={() => {

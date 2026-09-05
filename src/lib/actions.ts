@@ -951,6 +951,11 @@ export async function createExpenseAction(formData: unknown) {
     const parsed = expenseSchema.parse(formData);
 
     const expense = await prisma.$transaction(async (tx) => {
+      // If paid via Company Capital Treasury, ensure sufficient capital
+      if (parsed.method === "PARTNER_CAPITAL") {
+        await checkCompanyCapitalAvailability(tx, Number(parsed.amount));
+      }
+
       const newExpense = await tx.expense.create({
         data: {
           category: parsed.category,
@@ -958,7 +963,7 @@ export async function createExpenseAction(formData: unknown) {
           amount: new Decimal(parsed.amount),
           description: parsed.description,
           orderId: parsed.orderId || null,
-          paidById: parsed.paidById || user.id,
+          paidById: parsed.paidById || (parsed.method === "PARTNER_CAPITAL" ? null : user.id),
           method: parsed.method,
           expenseDate: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
           createdById: user.id,
@@ -988,7 +993,7 @@ export async function createExpenseAction(formData: unknown) {
         action: "RECORD_EXPENSE",
         entityType: "Expense",
         entityId: newExpense.id,
-        metadata: { amount: parsed.amount, category: parsed.category, type: parsed.type },
+        metadata: { amount: parsed.amount, category: parsed.category, type: parsed.type, method: parsed.method },
         tx,
       });
 
@@ -999,6 +1004,8 @@ export async function createExpenseAction(formData: unknown) {
     revalidatePath("/partners");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
+    revalidatePath("/inventory");
+    revalidatePath("/reports");
     return { success: true as const, expense: serializeData(expense) };
   } catch (err) {
     return formatError(err, "Failed to record expense.");
@@ -1014,6 +1021,63 @@ export async function updateExpenseAction(id: string, formData: unknown) {
     const parsed = expenseSchema.parse(formData);
 
     const expense = await prisma.$transaction(async (tx) => {
+      const existingExpense = await tx.expense.findUniqueOrThrow({ where: { id } });
+
+      if (parsed.method === "PARTNER_CAPITAL" && (existingExpense.method !== "PARTNER_CAPITAL" || Number(parsed.amount) > Number(existingExpense.amount))) {
+        const additionalRequired = existingExpense.method === "PARTNER_CAPITAL"
+          ? Number(parsed.amount) - Number(existingExpense.amount)
+          : Number(parsed.amount);
+        if (additionalRequired > 0) {
+          await checkCompanyCapitalAvailability(tx, additionalRequired);
+        }
+      }
+
+      // If previous expense had a mirrored partner transaction, update or clean it up
+      if (existingExpense.paidById && existingExpense.method !== "PARTNER_CAPITAL") {
+        const oldPartnerTx = await tx.partnerTransaction.findFirst({
+          where: {
+            partnerId: existingExpense.paidById,
+            type: "EXPENSE_PAID",
+            amount: existingExpense.amount,
+            description: existingExpense.description,
+          },
+        });
+        if (oldPartnerTx) {
+          if (parsed.paidById && parsed.method !== "PARTNER_CAPITAL") {
+            // Update the existing mirrored partner transaction
+            await tx.partnerTransaction.update({
+              where: { id: oldPartnerTx.id },
+              data: {
+                partnerId: parsed.paidById,
+                amount: new Decimal(parsed.amount),
+                description: parsed.description,
+                method: parsed.method || null,
+                occurredAt: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
+              },
+            });
+          } else {
+            // Switched to company capital or removed partner, delete old partner tx
+            await tx.partnerTransaction.delete({ where: { id: oldPartnerTx.id } });
+          }
+        }
+      } else if (parsed.paidById && parsed.method !== "PARTNER_CAPITAL") {
+        // Switched from company capital to partner out of pocket, create partner tx
+        const partnerUser = await tx.user.findUnique({ where: { id: parsed.paidById } });
+        if (partnerUser && partnerUser.role === "PARTNER") {
+          await tx.partnerTransaction.create({
+            data: {
+              partnerId: partnerUser.id,
+              type: "EXPENSE_PAID",
+              amount: new Decimal(parsed.amount),
+              description: parsed.description,
+              method: parsed.method || null,
+              occurredAt: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
+              createdById: user.id,
+            },
+          });
+        }
+      }
+
       const updatedExpense = await tx.expense.update({
         where: { id },
         data: {
@@ -1022,7 +1086,7 @@ export async function updateExpenseAction(id: string, formData: unknown) {
           amount: new Decimal(parsed.amount),
           description: parsed.description,
           orderId: parsed.orderId || null,
-          paidById: parsed.paidById || user.id,
+          paidById: parsed.paidById || (parsed.method === "PARTNER_CAPITAL" ? null : user.id),
           method: parsed.method,
           expenseDate: parsed.expenseDate ? new Date(parsed.expenseDate) : new Date(),
         },
@@ -1033,6 +1097,7 @@ export async function updateExpenseAction(id: string, formData: unknown) {
         action: "UPDATE_EXPENSE",
         entityType: "Expense",
         entityId: updatedExpense.id,
+        metadata: { amount: parsed.amount, category: parsed.category, method: parsed.method },
         tx,
       });
 
@@ -1043,9 +1108,66 @@ export async function updateExpenseAction(id: string, formData: unknown) {
     revalidatePath("/partners");
     revalidatePath("/orders");
     revalidatePath("/dashboard");
+    revalidatePath("/inventory");
+    revalidatePath("/reports");
     return { success: true as const, expense: serializeData(expense) };
   } catch (err) {
     return formatError(err, "Failed to update expense.");
+  }
+}
+
+export async function deleteExpenseAction(id: string) {
+  try {
+    const user = await requireUser();
+    if (!canManageFinance(user)) {
+      return { success: false, error: "Not authorized to delete expenses." };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.findUniqueOrThrow({ where: { id } });
+
+      // If this expense had a mirrored partner transaction (EXPENSE_PAID), delete it as well
+      if (expense.paidById && expense.method !== "PARTNER_CAPITAL") {
+        const partnerTx = await tx.partnerTransaction.findFirst({
+          where: {
+            partnerId: expense.paidById,
+            type: "EXPENSE_PAID",
+            amount: expense.amount,
+            description: expense.description,
+          },
+        });
+        if (partnerTx) {
+          await tx.partnerTransaction.delete({ where: { id: partnerTx.id } });
+        }
+      }
+
+      await tx.expense.delete({ where: { id } });
+
+      await logAudit({
+        actorId: user.id,
+        action: "DELETE_EXPENSE",
+        entityType: "Expense",
+        entityId: id,
+        metadata: {
+          description: expense.description,
+          amount: Number(expense.amount),
+          category: expense.category,
+        },
+        tx,
+      });
+
+      return expense;
+    });
+
+    revalidatePath("/finance");
+    revalidatePath("/partners");
+    revalidatePath("/orders");
+    revalidatePath("/dashboard");
+    revalidatePath("/inventory");
+    revalidatePath("/reports");
+    return { success: true as const, id: result.id };
+  } catch (err) {
+    return formatError(err, "Failed to delete expense.");
   }
 }
 
@@ -1349,21 +1471,31 @@ export async function updateSupplierAction(id: string, formData: unknown) {
 }
 
 async function checkCompanyCapitalAvailability(tx: any, requiredAmount: number) {
-  const [orders, expenses, partnerTransactions, partners, products] = await Promise.all([
+  const [orders, expenses, partnerTransactions, partners, products, payments] = await Promise.all([
     tx.order.findMany({ include: { items: true } }),
     tx.expense.findMany(),
     tx.partnerTransaction.findMany(),
     tx.user.findMany({ where: { role: "PARTNER" } }),
     tx.product.findMany({ where: { isActive: true }, select: { id: true, currentStock: true, purchaseCost: true } }),
+    tx.payment.findMany(),
   ]);
-  const { netProfit, totalRevenue } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
-  const { totalLiquidCashWithdrawable: availableCapital } = calculatePartnerBalances({
+  const { netProfit, totalRevenue, availableCompanyCash } = calculateProfitMetrics({
+    orders,
+    expenses,
+    partnerTransactions,
+    products,
+    payments,
+  });
+  const { availableCompanyCapital } = calculatePartnerBalances({
     partners,
     partnerTransactions,
     expenses,
     netProfit,
     totalRevenue,
+    payments,
   });
+
+  const availableCapital = availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash;
 
   if (requiredAmount > availableCapital + 0.01) {
     throw new Error(
@@ -1406,6 +1538,9 @@ export async function createProductAction(formData: unknown) {
         const totalAmount = new Decimal(parsed.purchaseCost).mul(parsed.currentStock);
         if (totalAmount.greaterThan(0)) {
           const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          const fundingPartnerId = isCompanyProfit ? null : (parsed.fundingPartnerId || user.id);
+          const fundingMethod = isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI");
+
           await tx.expense.create({
             data: {
               category: "MATERIALS",
@@ -1414,12 +1549,29 @@ export async function createProductAction(formData: unknown) {
               description: `Initial stock for ${newProduct.name} (${newProduct.sku}) - ${parsed.currentStock} ${newProduct.unit} (${
                 isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
               })`,
-              paidById: isCompanyProfit ? null : (parsed.fundingPartnerId || user.id),
-              method: isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI"),
+              paidById: fundingPartnerId,
+              method: fundingMethod,
               expenseDate: new Date(),
               createdById: user.id,
             },
           });
+
+          if (!isCompanyProfit && fundingPartnerId) {
+            const partnerUser = await tx.user.findUnique({ where: { id: fundingPartnerId } });
+            if (partnerUser && partnerUser.role === "PARTNER") {
+              await tx.partnerTransaction.create({
+                data: {
+                  partnerId: partnerUser.id,
+                  type: "EXPENSE_PAID",
+                  amount: totalAmount,
+                  description: `Initial stock procurement for ${newProduct.name} (${parsed.currentStock} ${newProduct.unit})`,
+                  method: fundingMethod,
+                  occurredAt: new Date(),
+                  createdById: user.id,
+                },
+              });
+            }
+          }
         }
       }
 
@@ -1451,25 +1603,92 @@ export async function updateProductAction(id: string, formData: unknown) {
     const user = await requireUser();
     const parsed = productSchema.parse(formData);
 
-    const product = await prisma.product.update({
-      where: { id },
-      data: {
-        name: parsed.name,
-        sku: parsed.sku.toUpperCase(),
-        category: parsed.category || null,
-        unit: parsed.unit || "pcs",
-        currentStock: parsed.currentStock,
-        minStock: parsed.minStock,
-        purchaseCost: new Decimal(parsed.purchaseCost),
-        supplierId: parsed.supplierId || null,
-      },
-    });
+    const product = await prisma.$transaction(async (tx) => {
+      const existingProduct = await tx.product.findUniqueOrThrow({ where: { id } });
+      const stockDelta = parsed.currentStock - existingProduct.currentStock;
 
-    await logAudit({
-      actorId: user.id,
-      action: "UPDATE_PRODUCT",
-      entityType: "Product",
-      entityId: product.id,
+      // If stock was increased and user specified a funding source
+      if (stockDelta > 0 && parsed.fundingSource && parsed.fundingSource !== "NONE") {
+        const totalAmount = new Decimal(parsed.purchaseCost).mul(stockDelta);
+        if (totalAmount.greaterThan(0)) {
+          const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          if (isCompanyProfit) {
+            await checkCompanyCapitalAvailability(tx, totalAmount.toNumber());
+          }
+
+          const fundingPartnerId = isCompanyProfit ? null : (parsed.fundingPartnerId || user.id);
+          const fundingMethod = isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI");
+
+          await tx.expense.create({
+            data: {
+              category: "MATERIALS",
+              type: "INVENTORY_PURCHASE",
+              amount: totalAmount,
+              description: `Stock procurement for ${parsed.name} (${parsed.sku}) - +${stockDelta} ${parsed.unit} (${
+                isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
+              })`,
+              paidById: fundingPartnerId,
+              method: fundingMethod,
+              expenseDate: new Date(),
+              createdById: user.id,
+            },
+          });
+
+          if (!isCompanyProfit && fundingPartnerId) {
+            const partnerUser = await tx.user.findUnique({ where: { id: fundingPartnerId } });
+            if (partnerUser && partnerUser.role === "PARTNER") {
+              await tx.partnerTransaction.create({
+                data: {
+                  partnerId: partnerUser.id,
+                  type: "EXPENSE_PAID",
+                  amount: totalAmount,
+                  description: `Stock procurement for ${parsed.name} (+${stockDelta} ${parsed.unit})`,
+                  method: fundingMethod,
+                  occurredAt: new Date(),
+                  createdById: user.id,
+                },
+              });
+            }
+          }
+        }
+      }
+
+      if (stockDelta !== 0) {
+        await tx.stockMovement.create({
+          data: {
+            productId: id,
+            type: stockDelta > 0 ? "PURCHASE" : "ADJUSTMENT",
+            quantity: Math.abs(stockDelta),
+            reference: `Product Edit: Stock adjusted from ${existingProduct.currentStock} to ${parsed.currentStock}`,
+            createdById: user.id,
+          },
+        });
+      }
+
+      const updatedProduct = await tx.product.update({
+        where: { id },
+        data: {
+          name: parsed.name,
+          sku: parsed.sku.toUpperCase(),
+          category: parsed.category || null,
+          unit: parsed.unit || "pcs",
+          currentStock: parsed.currentStock,
+          minStock: parsed.minStock,
+          purchaseCost: new Decimal(parsed.purchaseCost),
+          supplierId: parsed.supplierId || null,
+        },
+      });
+
+      await logAudit({
+        actorId: user.id,
+        action: "UPDATE_PRODUCT",
+        entityType: "Product",
+        entityId: updatedProduct.id,
+        metadata: { name: updatedProduct.name, sku: updatedProduct.sku, stock: updatedProduct.currentStock },
+        tx,
+      });
+
+      return updatedProduct;
     });
 
     revalidatePath("/inventory");
@@ -1480,6 +1699,53 @@ export async function updateProductAction(id: string, formData: unknown) {
     return { success: true as const, product: serializeData(product) };
   } catch (err) {
     return formatError(err, "Failed to update product.");
+  }
+}
+
+export async function deleteProductAction(id: string) {
+  try {
+    const user = await requireUser();
+
+    // Check if product is attached to any orders
+    const orderCount = await prisma.orderItem.count({ where: { productId: id } });
+    if (orderCount > 0) {
+      return {
+        success: false,
+        error: `Cannot delete product because it is linked to ${orderCount} order item(s). You can edit it and set stock to 0 instead.`,
+      };
+    }
+
+    // Check if product is attached to any bundles
+    const bundleCount = await prisma.bundleItem.count({ where: { productId: id } });
+    if (bundleCount > 0) {
+      return {
+        success: false,
+        error: `Cannot delete product because it is used in ${bundleCount} product combo bundle(s). Please remove it from the bundles first.`,
+      };
+    }
+
+    const deleted = await prisma.$transaction(async (tx) => {
+      await tx.stockMovement.deleteMany({ where: { productId: id } });
+      const p = await tx.product.delete({ where: { id } });
+      await logAudit({
+        actorId: user.id,
+        action: "DELETE_PRODUCT",
+        entityType: "Product",
+        entityId: id,
+        metadata: { name: p.name, sku: p.sku },
+        tx,
+      });
+      return p;
+    });
+
+    revalidatePath("/inventory");
+    revalidatePath("/finance");
+    revalidatePath("/partners");
+    revalidatePath("/reports");
+    revalidatePath("/dashboard");
+    return { success: true as const, id: deleted.id };
+  } catch (err) {
+    return formatError(err, "Failed to delete product.");
   }
 }
 
@@ -1532,6 +1798,9 @@ export async function recordStockMovementAction(formData: unknown) {
         const totalAmount = new Decimal(updatedProduct.purchaseCost).mul(parsed.quantity);
         if (totalAmount.greaterThan(0)) {
           const isCompanyProfit = parsed.fundingSource === "COMPANY_PROFIT";
+          const fundingPartnerId = isCompanyProfit ? null : (parsed.fundingPartnerId || user.id);
+          const fundingMethod = isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI");
+
           await tx.expense.create({
             data: {
               category: "MATERIALS",
@@ -1540,12 +1809,29 @@ export async function recordStockMovementAction(formData: unknown) {
               description: `Restock purchase of ${parsed.quantity} ${updatedProduct.unit} for ${updatedProduct.name} (${updatedProduct.sku}) - ${
                 isCompanyProfit ? "Company Profit Reinvestment" : "Funded by Partner"
               }`,
-              paidById: isCompanyProfit ? null : (parsed.fundingPartnerId || user.id),
-              method: isCompanyProfit ? "PARTNER_CAPITAL" : (parsed.fundingMethod || "UPI"),
+              paidById: fundingPartnerId,
+              method: fundingMethod,
               expenseDate: new Date(),
               createdById: user.id,
             },
           });
+
+          if (!isCompanyProfit && fundingPartnerId) {
+            const partnerUser = await tx.user.findUnique({ where: { id: fundingPartnerId } });
+            if (partnerUser && partnerUser.role === "PARTNER") {
+              await tx.partnerTransaction.create({
+                data: {
+                  partnerId: partnerUser.id,
+                  type: "EXPENSE_PAID",
+                  amount: totalAmount,
+                  description: `Restock purchase for ${updatedProduct.name} (${parsed.quantity} ${updatedProduct.unit})`,
+                  method: fundingMethod,
+                  occurredAt: new Date(),
+                  createdById: user.id,
+                },
+              });
+            }
+          }
         }
       }
 

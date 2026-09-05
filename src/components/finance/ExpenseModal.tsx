@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { X, Loader2, Building2, Package, Wrench, Zap, Info } from "lucide-react";
-import { createExpenseAction, updateExpenseAction } from "@/lib/actions";
+import { useState, useEffect } from "react";
+import { X, Loader2, Building2, Package, Wrench, Zap, Info, AlertTriangle, ArrowRightCircle, Trash2 } from "lucide-react";
+import { createExpenseAction, updateExpenseAction, deleteExpenseAction } from "@/lib/actions";
 
 interface ExpenseModalProps {
   expense?: {
@@ -18,6 +18,7 @@ interface ExpenseModalProps {
   } | null;
   orders: Array<{ id: string; orderNumber: string }>;
   partners: Array<{ id: string; name: string }>;
+  availableCapital?: number;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -109,8 +110,9 @@ const TYPE_CONFIG: Record<
   },
 };
 
-export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: ExpenseModalProps) {
+export function ExpenseModal({ expense, orders, partners, availableCapital = 0, isOpen, onClose }: ExpenseModalProps) {
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const initialType = expense?.type || "OPERATING_EXPENSE";
@@ -119,6 +121,23 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
     expense?.category || TYPE_CONFIG[initialType]?.defaultCategory || "DELIVERY"
   );
   const [selectedMethod, setSelectedMethod] = useState<string>(expense?.method || "UPI");
+  const [amountVal, setAmountVal] = useState<number>(expense ? Number(expense.amount) : 1000);
+
+  useEffect(() => {
+    if (expense) {
+      const type = expense.type || "OPERATING_EXPENSE";
+      setSelectedType(type);
+      setSelectedCategory(expense.category || TYPE_CONFIG[type]?.defaultCategory || "DELIVERY");
+      setSelectedMethod(expense.method || "UPI");
+      setAmountVal(Number(expense.amount) || 0);
+    } else {
+      setSelectedType("OPERATING_EXPENSE");
+      setSelectedCategory("DELIVERY");
+      setSelectedMethod("UPI");
+      setAmountVal(1000);
+    }
+    setError("");
+  }, [expense, isOpen]);
 
   if (!isOpen) return null;
 
@@ -129,11 +148,14 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
   const recommendedCats = activeConfig.recommendedCategories;
   const otherCats = CATEGORIES.filter((c) => !recommendedCats.includes(c));
 
+  const isExceedingCapital =
+    selectedMethod === "PARTNER_CAPITAL" &&
+    amountVal > availableCapital;
+
   function handleTypeChange(newType: string) {
     setSelectedType(newType);
     const config = TYPE_CONFIG[newType];
     if (config) {
-      // If current category is not in recommended for new type, switch to default for new type
       if (!config.recommendedCategories.includes(selectedCategory)) {
         setSelectedCategory(config.defaultCategory);
       }
@@ -144,6 +166,18 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    if (isExceedingCapital) {
+      setError(
+        `Insufficient company capital (Available: ₹${availableCapital.toLocaleString(
+          "en-IN"
+        )}, Required: ₹${amountVal.toLocaleString(
+          "en-IN"
+        )}). Please select a Partner who paid out-of-pocket (UPI, Cash, Bank Transfer) or inject capital first.`
+      );
+      setLoading(false);
+      return;
+    }
 
     const formData = new FormData(e.currentTarget);
     const data = {
@@ -178,6 +212,31 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
     }
   }
 
+  async function handleDelete() {
+    if (!expense) return;
+    if (!confirm(`Are you sure you want to permanently delete this expense of ₹${Number(expense.amount).toLocaleString()} (${expense.description})?`)) {
+      return;
+    }
+    setDeleting(true);
+    setError("");
+    try {
+      const res = await deleteExpenseAction(expense.id);
+      if (!res.success) {
+        setError(res.error || "Failed to delete expense.");
+        return;
+      }
+      onClose();
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to delete expense.");
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const defaultDate = expense
     ? new Date(expense.expenseDate).toISOString().split("T")[0]
     : new Date().toISOString().split("T")[0];
@@ -206,46 +265,43 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          {/* Classification Selection */}
           <div>
-            <label className="block text-xs font-semibold text-[#4e584f]">Expense Classification Type *</label>
-            <select
-              name="type"
-              required
-              value={selectedType}
-              onChange={(e) => handleTypeChange(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#f8faf6] px-3 py-2 text-xs font-bold text-[#20231f] focus:border-[#3f563f] focus:outline-none"
-            >
-              <option value="OPERATING_EXPENSE">🏢 Operating Overhead (OpEx) — Rent, Logistics, Transport, Tools</option>
-              <option value="INVENTORY_PURCHASE">📦 Bulk Stock Purchase (CapEx) — Asset Purchase (Prevents Double-Counting)</option>
-              <option value="CAPITAL_INVESTMENT">⚙️ Capital Investment — Equipment, Machinery, Founding Assets</option>
-              <option value="OTHER">⚡ Other Miscellaneous</option>
-            </select>
+            <label className="block text-xs font-semibold text-[#4e584f]">Expense Classification *</label>
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              {Object.entries(TYPE_CONFIG).map(([key, config]) => {
+                const isSelected = selectedType === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleTypeChange(key)}
+                    className={`flex flex-col items-start rounded-lg border p-2.5 text-left transition ${
+                      isSelected
+                        ? `${config.cardBg} ${config.borderColor} ring-1 ring-[#3f563f]`
+                        : "border-[#d8ded2] bg-[#fdfdfc] hover:bg-[#edf1e8]"
+                    }`}
+                  >
+                    <span className="text-xs font-semibold text-[#20231f]">{config.title}</span>
+                    <span className="mt-0.5 text-[10px] text-[#6b746c] line-clamp-1">{config.badge}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Dynamic Context Banner */}
-          <div className={`rounded-lg border p-3 text-xs ${activeConfig.cardBg} ${activeConfig.borderColor}`}>
-            <div className="flex items-start gap-2.5">
+          <div className={`rounded-lg border p-3 ${activeConfig.cardBg} ${activeConfig.borderColor}`}>
+            <div className="flex items-start gap-2">
               <ConfigIcon className={`size-4 shrink-0 mt-0.5 ${activeConfig.textColor}`} />
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className={`font-bold ${activeConfig.textColor}`}>{activeConfig.title}</span>
-                  <span className="rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold border border-black/10 text-gray-700">
-                    {activeConfig.badge}
-                  </span>
-                </div>
-                <p className="text-[#4e584f] text-[11px] leading-relaxed">
-                  {activeConfig.descriptionHint}
+              <div className="space-y-0.5 text-xs">
+                <p className={`font-semibold ${activeConfig.textColor}`}>{activeConfig.badge}</p>
+                <p className="text-[11px] text-[#4e584f]">{activeConfig.descriptionHint}</p>
+                <p className="text-[10px] font-medium text-[#6b746c] pt-1">
+                  Accounting Impact: <span className="italic">{activeConfig.impactSummary}</span>
                 </p>
-                <div className="flex items-center gap-1 text-[11px] font-medium text-[#20231f] pt-0.5">
-                  <Info className="size-3 text-[#3f563f] shrink-0" />
-                  <span>{activeConfig.impactSummary}</span>
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Category & Amount */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[#4e584f]">Category *</label>
@@ -283,14 +339,14 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
                 step="0.01"
                 min={1}
                 required
-                defaultValue={expense ? Number(expense.amount) : 1}
+                value={amountVal}
+                onChange={(e) => setAmountVal(Number(e.target.value) || 0)}
                 placeholder="1000"
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-sm focus:border-[#3f563f] focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Description with Dynamic Placeholder */}
           <div>
             <label className="block text-xs font-semibold text-[#4e584f]">Description *</label>
             <input
@@ -301,12 +357,8 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
               placeholder={activeConfig.placeholder}
               className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-xs focus:border-[#3f563f] focus:outline-none"
             />
-            <p className="mt-1 text-[10px] text-[#6b746c]">
-              Provide a clear description for audit tracking.
-            </p>
           </div>
 
-          {/* Dynamic Link to Order and Paid By Partner */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[#4e584f]">{activeConfig.orderLabel}</label>
@@ -331,7 +383,7 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
                 defaultValue={expense?.paidById || ""}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-xs focus:border-[#3f563f] focus:outline-none"
               >
-                <option value="">Current User / All Partners</option>
+                <option value="">Company Treasury / No Partner</option>
                 {partners.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -341,7 +393,6 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
             </div>
           </div>
 
-          {/* Payment Method & Expense Date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[#4e584f]">Payment Method *</label>
@@ -352,10 +403,10 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
                 onChange={(e) => setSelectedMethod(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-[#d8ded2] bg-[#fdfdfc] px-3 py-2 text-xs focus:border-[#3f563f] focus:outline-none"
               >
-                <option value="UPI">UPI</option>
-                <option value="BANK_TRANSFER">Bank Transfer</option>
-                <option value="CASH">Cash</option>
-                <option value="PARTNER_CAPITAL">🏛️ Partner Capital Fund</option>
+                <option value="UPI">UPI (Partner Out-of-Pocket)</option>
+                <option value="BANK_TRANSFER">Bank Transfer (Partner Out-of-Pocket)</option>
+                <option value="CASH">Cash (Partner Out-of-Pocket)</option>
+                <option value="PARTNER_CAPITAL">🏛️ Company Capital Fund (Avail: ₹{availableCapital.toLocaleString("en-IN")})</option>
                 <option value="OTHER">Other</option>
               </select>
             </div>
@@ -371,29 +422,77 @@ export function ExpenseModal({ expense, orders, partners, isOpen, onClose }: Exp
             </div>
           </div>
 
-          {selectedMethod === "PARTNER_CAPITAL" && (
-            <div className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-900 border border-amber-200 font-medium flex items-center gap-2">
-              <Info className="size-4 text-amber-800 shrink-0" />
-              <span>🏛️ <strong>Partner Capital Fund</strong>: This expense will be deducted directly from the partner capital balance.</span>
+          {isExceedingCapital && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2 text-xs">
+              <div className="flex items-start gap-2 text-amber-900">
+                <AlertTriangle className="size-4 shrink-0 text-amber-600 mt-0.5" />
+                <div>
+                  <p className="font-bold">Insufficient Company Capital</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    This expense is <strong>₹{amountVal.toLocaleString("en-IN")}</strong>, but available company capital is only <strong>₹{availableCapital.toLocaleString("en-IN")}</strong>.
+                  </p>
+                  <p className="text-[11px] text-amber-800 mt-1">
+                    Please switch payment method to <strong>UPI, Cash, or Bank Transfer</strong> with a partner selected to credit their invested capital.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedMethod("UPI")}
+                className="flex items-center gap-1.5 rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800 transition"
+              >
+                <ArrowRightCircle className="size-3.5" />
+                Switch to Partner Out-of-Pocket (UPI)
+              </button>
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-2 border-t border-[#edf1e8]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-[#d8ded2] px-4 py-2 text-xs font-medium text-[#4e584f] hover:bg-[#edf1e8]"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
-            >
-              {loading && <Loader2 className="size-3.5 animate-spin" />}
-              {isEditing ? "Save Changes" : "Record Expense"}
-            </button>
+          {selectedMethod === "PARTNER_CAPITAL" && !isExceedingCapital && (
+            <div className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-900 border border-amber-200 font-medium flex items-center gap-2">
+              <Info className="size-4 text-amber-800 shrink-0" />
+              <span>🏛️ <strong>Company Capital Fund</strong>: This expense will be paid directly out of the liquid company capital treasury.</span>
+            </div>
+          )}
+
+          {selectedMethod !== "PARTNER_CAPITAL" && (
+            <div className="rounded-lg bg-emerald-50 p-2.5 text-xs text-emerald-900 border border-emerald-200 font-medium flex items-center gap-2">
+              <Info className="size-4 text-emerald-800 shrink-0" />
+              <span>👤 <strong>Partner Out-of-Pocket</strong>: Automatically credited to the paying partner's invested capital balance.</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2 border-t border-[#edf1e8]">
+            {isEditing ? (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={loading || deleting}
+                className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                Delete Expense
+              </button>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-[#d8ded2] px-4 py-2 text-xs font-medium text-[#4e584f] hover:bg-[#edf1e8]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading || deleting || isExceedingCapital}
+                className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
+              >
+                {loading && <Loader2 className="size-3.5 animate-spin" />}
+                {isEditing ? "Save Changes" : "Record Expense"}
+              </button>
+            </div>
           </div>
         </form>
       </div>

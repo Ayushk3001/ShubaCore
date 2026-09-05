@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { X, Loader2, AlertTriangle, ArrowRightCircle } from "lucide-react";
-import { createProductAction, updateProductAction } from "@/lib/actions";
+import { useState, useEffect } from "react";
+import { X, Loader2, AlertTriangle, ArrowRightCircle, Trash2 } from "lucide-react";
+import { createProductAction, updateProductAction, deleteProductAction } from "@/lib/actions";
 
 interface ProductModalProps {
   product?: {
@@ -30,19 +30,35 @@ export function ProductModal({
   onClose,
 }: ProductModalProps) {
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
-  const [fundingSource, setFundingSource] = useState<string>("NONE");
-  const [stockQty, setStockQty] = useState<number>(product?.currentStock ?? 50);
-  const [unitCost, setUnitCost] = useState<number>(
-    product?.purchaseCost ? Number(product.purchaseCost) : 45
-  );
+  const [fundingSource, setFundingSource] = useState<string>("COMPANY_PROFIT");
+  const [stockQty, setStockQty] = useState<number>(50);
+  const [unitCost, setUnitCost] = useState<number>(45);
+
+  useEffect(() => {
+    if (product) {
+      setStockQty(product.currentStock ?? 0);
+      setUnitCost(product.purchaseCost ? Number(product.purchaseCost) : 45);
+      setFundingSource("NONE");
+    } else {
+      setStockQty(50);
+      setUnitCost(45);
+      setFundingSource(availableCapital >= 2250 ? "COMPANY_PROFIT" : "PARTNER_OUT_OF_POCKET");
+    }
+    setError("");
+  }, [product, isOpen, availableCapital]);
 
   if (!isOpen) return null;
 
   const isEditing = Boolean(product);
-  const totalProcurementCost = stockQty * unitCost;
+  const initialStock = product?.currentStock ?? 0;
+  const stockDelta = isEditing ? stockQty - initialStock : stockQty;
+  const isStockIncreasing = stockDelta > 0;
+  const totalProcurementCost = isStockIncreasing ? stockDelta * unitCost : 0;
+
   const isExceedingCapital =
-    !isEditing &&
+    isStockIncreasing &&
     fundingSource === "COMPANY_PROFIT" &&
     totalProcurementCost > availableCapital;
 
@@ -99,16 +115,41 @@ export function ProductModal({
     }
   }
 
+  async function handleDelete() {
+    if (!product) return;
+    if (!confirm(`Are you sure you want to permanently delete SKU "${product.sku}" (${product.name})?`)) {
+      return;
+    }
+    setDeleting(true);
+    setError("");
+    try {
+      const res = await deleteProductAction(product.id);
+      if (!res.success) {
+        setError(res.error || "Failed to delete product.");
+        return;
+      }
+      onClose();
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to delete product.");
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-xl border border-[#d8ded2] bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[#edf1e8] pb-4">
           <div>
             <h2 className="text-lg font-bold text-[#20231f]">
-              {isEditing ? "Edit Product SKU" : "Add New Inventory Product"}
+              {isEditing ? `Edit Product SKU: ${product?.sku}` : "Add New Inventory Product"}
             </h2>
             <p className="text-xs text-[#6b746c]">
-              Catalog items with automatic procurement cost & stock tracking.
+              Catalog items with automatic procurement cost, capital validation & stock tracking.
             </p>
           </div>
           <button onClick={onClose} type="button" className="rounded-lg p-1.5 text-[#6b746c] hover:bg-[#edf1e8]">
@@ -177,7 +218,9 @@ export function ProductModal({
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-[#4e584f]">Current Stock *</label>
+              <label className="block text-xs font-semibold text-[#4e584f]">
+                Stock Level * {isEditing && <span className="text-[10px] text-gray-500 font-normal">(Prev: {initialStock})</span>}
+              </label>
               <input
                 type="number"
                 name="currentStock"
@@ -230,13 +273,13 @@ export function ProductModal({
             </select>
           </div>
 
-          {/* Initial Stock Funding / Financial Tracking (Only for new products with stock > 0) */}
-          {!isEditing && (
+          {/* Stock Funding / Financial Tracking (Triggered if adding new product with stock > 0, or increasing stock on edit) */}
+          {isStockIncreasing && (
             <div className="rounded-lg border border-[#d8ded2] bg-[#f8faf6] p-3.5 space-y-3 text-xs">
               <div>
                 <div className="flex items-center justify-between">
                   <label className="block font-semibold text-[#20231f]">
-                    How is this initial stock funded?
+                    {isEditing ? `How is +${stockDelta} additional stock funded?` : "How is this initial stock funded?"}
                   </label>
                   <span className="text-[11px] font-bold text-[#3f563f]">
                     Cost: ₹{totalProcurementCost.toLocaleString("en-IN")}
@@ -251,11 +294,11 @@ export function ProductModal({
                   onChange={(e) => setFundingSource(e.target.value)}
                   className="mt-1.5 w-full rounded-lg border border-[#d8ded2] bg-white px-3 py-2 text-xs font-medium text-[#20231f] focus:border-[#3f563f] focus:outline-none"
                 >
-                  <option value="NONE">📦 Existing Stock / Opening Inventory (No Expense Logged)</option>
                   <option value="COMPANY_PROFIT">
                     🏛️ Reinvested Company Capital / Profit (Avail: ₹{availableCapital.toLocaleString("en-IN")})
                   </option>
                   <option value="PARTNER_OUT_OF_POCKET">👤 Paid by Partner Out-of-Pocket (Credit Partner Capital)</option>
+                  <option value="NONE">📦 Existing Stock / Opening Inventory (No Expense Logged)</option>
                 </select>
               </div>
 
@@ -267,10 +310,10 @@ export function ProductModal({
                     <div>
                       <p className="font-bold">Insufficient Company Capital</p>
                       <p className="text-[11px] text-amber-800 mt-0.5">
-                        This stock costs <strong>₹{totalProcurementCost.toLocaleString("en-IN")}</strong>, but available company capital is only <strong>₹{availableCapital.toLocaleString("en-IN")}</strong>.
+                        This stock purchase costs <strong>₹{totalProcurementCost.toLocaleString("en-IN")}</strong>, but available company capital is only <strong>₹{availableCapital.toLocaleString("en-IN")}</strong>.
                       </p>
                       <p className="text-[11px] text-amber-800 mt-1">
-                        Please select <strong>Paid by Partner Out-of-Pocket</strong> to have a partner fund this purchase, or add a Capital Contribution in the Partners ledger first.
+                        Please select <strong>Paid by Partner Out-of-Pocket</strong> to have a partner fund this stock, which will automatically credit their invested capital.
                       </p>
                     </div>
                   </div>
@@ -318,22 +361,38 @@ export function ProductModal({
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-[#d8ded2] px-4 py-2 text-xs font-medium text-[#4e584f] hover:bg-[#edf1e8]"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading || isExceedingCapital}
-              className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
-            >
-              {loading && <Loader2 className="size-3.5 animate-spin" />}
-              {isEditing ? "Save Product" : "Add Product SKU"}
-            </button>
+          <div className="flex items-center justify-between pt-2 border-t border-[#edf1e8]">
+            {isEditing ? (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={loading || deleting}
+                className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                Delete SKU
+              </button>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-[#d8ded2] px-4 py-2 text-xs font-medium text-[#4e584f] hover:bg-[#edf1e8]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading || deleting || isExceedingCapital}
+                className="flex items-center gap-2 rounded-lg bg-[#263326] px-4 py-2 text-xs font-medium text-white hover:bg-[#394a39] disabled:opacity-50"
+              >
+                {loading && <Loader2 className="size-3.5 animate-spin" />}
+                {isEditing ? "Save Product" : "Add Product SKU"}
+              </button>
+            </div>
           </div>
         </form>
       </div>

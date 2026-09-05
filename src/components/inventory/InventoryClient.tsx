@@ -6,7 +6,7 @@ import { ProductModal } from "./ProductModal";
 import { SupplierModal } from "./SupplierModal";
 import { StockAdjustModal } from "./StockAdjustModal";
 import { BundleModal } from "./BundleModal";
-import { deleteProductBundleAction } from "@/lib/actions";
+import { deleteProductBundleAction, deleteProductAction } from "@/lib/actions";
 import { calculateBundlePrice, calculateBundleVirtualStock } from "@/lib/bundles";
 
 export function InventoryClient({
@@ -73,6 +73,15 @@ export function InventoryClient({
     setIsProductModalOpen(true);
   }
 
+  async function handleDeleteProduct(product: any) {
+    if (confirm(`Are you sure you want to delete SKU "${product.sku}" (${product.name})?`)) {
+      const res = await deleteProductAction(product.id);
+      if (res && !res.success) {
+        alert(res.error || "Failed to delete product.");
+      }
+    }
+  }
+
   function handleEditSupplier(supplier: any) {
     setSelectedSupplier(supplier);
     setIsSupplierModalOpen(true);
@@ -95,7 +104,10 @@ export function InventoryClient({
 
   async function handleDeleteBundle(id: string) {
     if (confirm("Are you sure you want to delete this product combo bundle?")) {
-      await deleteProductBundleAction(id);
+      const res = await deleteProductBundleAction(id);
+      if (res && !res.success) {
+        alert(res.error || "Failed to delete combo bundle.");
+      }
     }
   }
 
@@ -288,12 +300,22 @@ export function InventoryClient({
                           {p.supplier?.name || "Unassigned"}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => handleEditProduct(p)}
-                            className="inline-flex items-center gap-1 rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
-                          >
-                            <Edit2 className="size-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              title="Edit SKU"
+                              onClick={() => handleEditProduct(p)}
+                              className="inline-flex items-center rounded-md p-1.5 text-[#6b746c] hover:bg-[#edf1e8] hover:text-[#20231f]"
+                            >
+                              <Edit2 className="size-4" />
+                            </button>
+                            <button
+                              title="Delete SKU"
+                              onClick={() => handleDeleteProduct(p)}
+                              className="inline-flex items-center rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

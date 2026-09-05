@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-import { calculateProfitMetrics } from "@/lib/profit";
+import { calculateProfitMetrics, calculatePartnerBalances } from "@/lib/profit";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -13,12 +13,14 @@ import {
   ArrowRight,
   Clock,
   CheckCircle2,
+  Wallet,
+  Package,
 } from "lucide-react";
 
 export default async function DashboardPage() {
   const user = await requireUser();
 
-  const [orders, payments, expenses, partnerTransactions, leads, customers, allOrders, products] = await Promise.all([
+  const [orders, payments, expenses, partnerTransactions, leads, customers, allOrders, products, partners] = await Promise.all([
     prisma.order.findMany({
       take: 5,
       orderBy: { createdAt: "desc" },
@@ -36,6 +38,7 @@ export default async function DashboardPage() {
       where: { isActive: true },
       select: { id: true, currentStock: true, purchaseCost: true },
     }),
+    prisma.user.findMany({ where: { role: "PARTNER" } }),
   ]);
 
   const {
@@ -45,7 +48,14 @@ export default async function DashboardPage() {
     inventoryAssetValuation,
     netProfit,
     marginPercent,
-  } = calculateProfitMetrics({ orders: allOrders, expenses, partnerTransactions, products });
+    availableCompanyCash,
+  } = calculateProfitMetrics({ orders: allOrders, expenses, partnerTransactions, products, payments });
+
+  const {
+    availableCompanyCapital,
+  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue, payments });
+
+  const liquidCapital = availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash;
 
   // REFUND payments are cash returned to the customer, so they reduce the net collected.
   const totalCollected = payments.reduce(
@@ -85,15 +95,26 @@ export default async function DashboardPage() {
 
       {/* Analytics KPI Grid */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[#6b746c]">Total Revenue</span>
-            <div className="flex size-8 items-center justify-center rounded-lg bg-[#edf1e8] text-[#3f563f]">
-              <TrendingUp className="size-4" />
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-950">Company Capital & Cash</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-200 text-emerald-950">
+              <Wallet className="size-4" />
             </div>
           </div>
-          <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{totalRevenue.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">From active order quotations</p>
+          <p className="mt-3 text-2xl font-black text-emerald-950">₹{liquidCapital.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-emerald-800 font-medium">Usable for inventory & partner withdrawals</p>
+        </div>
+
+        <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-950">Inventory Valuation</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-amber-200 text-amber-950">
+              <Package className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-black text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-amber-800 font-medium">Warehouse stock assets</p>
         </div>
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
@@ -104,18 +125,7 @@ export default async function DashboardPage() {
             </div>
           </div>
           <p className="mt-3 text-2xl font-bold text-emerald-950">₹{totalCollected.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">Advance & final payments</p>
-        </div>
-
-        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[#6b746c]">Operating Overhead (OpEx)</span>
-            <div className="flex size-8 items-center justify-center rounded-lg bg-rose-100 text-rose-900">
-              <Receipt className="size-4" />
-            </div>
-          </div>
-          <p className="mt-3 text-2xl font-bold text-rose-950">₹{operatingExpenses.toLocaleString()}</p>
-          <p className="mt-1 text-[11px] text-[#8a948b]">Logistics, tools, overheads</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Advance & final customer payments</p>
         </div>
 
         <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">

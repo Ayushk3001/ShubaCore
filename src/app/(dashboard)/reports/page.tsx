@@ -6,7 +6,7 @@ import { BarChart3, PieChart, TrendingUp, DollarSign, Users, ShoppingBag, Coins,
 export default async function ReportsPage() {
   await requireUser();
 
-  const [orders, expenses, partnerTransactions, partners, leads, products] = await Promise.all([
+  const [orders, expenses, partnerTransactions, partners, leads, products, payments] = await Promise.all([
     prisma.order.findMany({
       include: { assignedPartner: true, payments: true, expenses: true, items: true },
     }),
@@ -18,6 +18,7 @@ export default async function ReportsPage() {
       where: { isActive: true },
       select: { id: true, currentStock: true, purchaseCost: true },
     }),
+    prisma.payment.findMany(),
   ]);
 
   const {
@@ -35,13 +36,17 @@ export default async function ReportsPage() {
     totalCapitalInvested,
     unrecoveredCapitalBalance,
     capitalRecoveredPercent,
-  } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products });
+    availableCompanyCash,
+  } = calculateProfitMetrics({ orders, expenses, partnerTransactions, products, payments });
 
   const {
     totalLiquidCashWithdrawable,
     totalTiedUpInStock,
     totalPartnerContributed,
-  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue });
+    availableCompanyCapital,
+  } = calculatePartnerBalances({ partners, partnerTransactions, expenses, netProfit, totalRevenue, payments });
+
+  const liquidCashInBank = availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash;
 
   // Revenue by Partner
   const revenueByPartner = partners.map((p) => {
@@ -123,9 +128,9 @@ export default async function ReportsPage() {
               <span className="font-bold text-emerald-950 uppercase tracking-wider text-[11px]">Liquid Cash in Bank/Register</span>
               <Coins className="size-4 text-emerald-800" />
             </div>
-            <p className="mt-2 text-2xl font-black text-emerald-950">₹{totalLiquidCashWithdrawable.toLocaleString()}</p>
+            <p className="mt-2 text-2xl font-black text-emerald-950">₹{liquidCashInBank.toLocaleString()}</p>
             <p className="mt-1 text-[10px] text-emerald-800 font-medium">
-              Free profit available for withdrawal or purchases
+              Usable for new inventory purchases or partner withdrawals
             </p>
           </div>
 
@@ -136,20 +141,20 @@ export default async function ReportsPage() {
             </div>
             <p className="mt-2 text-2xl font-black text-amber-950">₹{inventoryAssetValuation.toLocaleString()}</p>
             <p className="mt-1 text-[10px] text-amber-800 font-medium">
-              Value of all products on shelves
+              Physical inventory asset valuation
             </p>
           </div>
 
           <div className="rounded-lg border border-[#edf1e8] bg-[#f8faf6] p-4">
             <span className="font-semibold text-[#6b746c] uppercase tracking-wider text-[11px]">Partner Contributed Capital</span>
             <p className="mt-2 text-2xl font-bold text-[#20231f]">₹{totalPartnerContributed.toLocaleString()}</p>
-            <p className="mt-1 text-[10px] text-[#8a948b]">Preserved inside warehouse stock</p>
+            <p className="mt-1 text-[10px] text-[#8a948b]">Total capital injected by partners</p>
           </div>
 
           <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-4">
             <span className="font-semibold text-blue-900 uppercase tracking-wider text-[11px]">Total Business Net Worth</span>
-            <p className="mt-2 text-2xl font-bold text-blue-950">₹{(inventoryAssetValuation + totalLiquidCashWithdrawable).toLocaleString()}</p>
-            <p className="mt-1 text-[10px] text-blue-800">₹{inventoryAssetValuation.toLocaleString()} Stock + ₹{totalLiquidCashWithdrawable.toLocaleString()} Cash</p>
+            <p className="mt-2 text-2xl font-bold text-blue-950">₹{(inventoryAssetValuation + liquidCashInBank).toLocaleString()}</p>
+            <p className="mt-1 text-[10px] text-blue-800">₹{inventoryAssetValuation.toLocaleString()} Stock + ₹{liquidCashInBank.toLocaleString()} Liquid Cash</p>
           </div>
         </div>
       </div>

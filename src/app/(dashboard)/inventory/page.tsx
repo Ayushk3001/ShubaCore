@@ -7,7 +7,7 @@ import { calculateProfitMetrics, calculatePartnerBalances } from "@/lib/profit";
 export default async function InventoryPage() {
   await requireUser();
 
-  const [products, suppliers, stockMovements, bundles, partners, orders, expenses, partnerTransactions] = await Promise.all([
+  const [products, suppliers, stockMovements, bundles, partners, orders, expenses, partnerTransactions, payments] = await Promise.all([
     prisma.product.findMany({
       orderBy: { name: "asc" },
       include: {
@@ -49,22 +49,27 @@ export default async function InventoryPage() {
     }),
     prisma.expense.findMany(),
     prisma.partnerTransaction.findMany(),
+    prisma.payment.findMany(),
   ]);
 
-  const { netProfit, totalRevenue } = calculateProfitMetrics({
+  const { netProfit, totalRevenue, availableCompanyCash } = calculateProfitMetrics({
     orders,
     expenses,
     partnerTransactions,
     products,
+    payments,
   });
 
-  const { totalLiquidCashWithdrawable: availableCapital } = calculatePartnerBalances({
+  const { availableCompanyCapital } = calculatePartnerBalances({
     partners,
     partnerTransactions,
     expenses,
     netProfit,
     totalRevenue,
+    payments,
   });
+
+  const availableCapital = availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash;
 
   return (
     <InventoryClient

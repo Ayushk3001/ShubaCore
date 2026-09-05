@@ -13,20 +13,44 @@ export function PartnersClient({
   expenses = [],
   orders = [],
   products = [],
+  payments = [],
 }: {
   partners: Array<any>;
   transactions: Array<any>;
   expenses?: Array<any>;
   orders?: Array<any>;
   products?: Array<any>;
+  payments?: Array<any>;
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [isAddPartnerOpen, setIsAddPartnerOpen] = useState(false);
   const [deactivatingPartnerId, setDeactivatingPartnerId] = useState<string | null>(null);
 
-  const { netProfit, totalRevenue } = calculateProfitMetrics({ orders, expenses, partnerTransactions: transactions, products });
-  const { partnerBalances } = calculatePartnerBalances({ partners, partnerTransactions: transactions, expenses, netProfit, totalRevenue });
+  const { netProfit, totalRevenue, availableCompanyCash, totalCapitalInvested, directPartnerInvestments } = calculateProfitMetrics({
+    orders,
+    expenses,
+    partnerTransactions: transactions,
+    products,
+    payments,
+  });
+  const {
+    partnerBalances,
+    totalPartnerContributed,
+    totalPartnerWithdrawn,
+    totalPartnerAllocatedProfit,
+    totalWithdrawableCapital,
+    availableCompanyCapital,
+  } = calculatePartnerBalances({
+    partners,
+    partnerTransactions: transactions,
+    expenses,
+    netProfit,
+    totalRevenue,
+    payments,
+  });
+
+  const liquidCapital = availableCompanyCapital > 0 ? availableCompanyCapital : availableCompanyCash;
 
   async function handleRemovePartner(id: string, name: string) {
     if (!confirm(`Are you sure you want to remove ${name} as a partner? Their historical transactions will remain in audit logs, but future profit allocation will only be split among active remaining partners.`)) {
@@ -76,16 +100,99 @@ export function PartnersClient({
         </div>
       </div>
 
+      {/* Summary KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-5 shadow-sm">
+          <div className="flex items-center justify-between text-emerald-950">
+            <span className="text-xs font-semibold uppercase tracking-wider">Available Company Capital</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-200 text-emerald-900">
+              <Wallet className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-emerald-950">₹{liquidCapital.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-emerald-800">Current liquid treasury for payouts & stock</p>
+        </div>
+
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-[#6b746c]">
+            <span className="text-xs font-semibold uppercase tracking-wider">Total Capital Invested</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-100 text-blue-800">
+              <Shield className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{totalPartnerContributed.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Contributed capital basis across partners</p>
+        </div>
+
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-[#6b746c]">
+            <span className="text-xs font-semibold uppercase tracking-wider">Net Business Profit</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-purple-100 text-purple-800">
+              <ArrowUpRight className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-purple-950">₹{netProfit.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Split dynamically according to stake %</p>
+        </div>
+
+        <div className="rounded-xl border border-[#d8ded2] bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-[#6b746c]">
+            <span className="text-xs font-semibold uppercase tracking-wider">Total Withdrawals Taken</span>
+            <div className="flex size-8 items-center justify-center rounded-lg bg-rose-100 text-rose-800">
+              <ArrowDownRight className="size-4" />
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#20231f]">₹{totalPartnerWithdrawn.toLocaleString()}</p>
+          <p className="mt-1 text-[11px] text-[#8a948b]">Cash payouts drawn from treasury</p>
+        </div>
+      </div>
+
+      {/* Stake & Withdrawable Allocation Formula Banner */}
+      <div className="rounded-xl border border-[#d8ded2] bg-[#fcfdfa] p-4 text-xs text-[#5f685e] space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="font-bold text-[#20231f] text-sm">📐 Live Partner Stake & Liquid Withdrawal Formula</span>
+          <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
+            Automated Pro-Rata Math
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 text-[11px]">
+          <div className="rounded-lg bg-white p-3 border border-[#edf1e8] space-y-1">
+            <span className="font-bold text-blue-900">1. Stake Ownership %</span>
+            <p className="text-[#4e584f]">
+              <code>(Partner Capital / Total Capital Pool) × 100</code>
+            </p>
+            <p className="text-[10px] text-[#6b746c]">Determines dynamic profit share & equity ownership.</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 border border-[#edf1e8] space-y-1">
+            <span className="font-bold text-purple-900">2. Total Stake Amount (Equity)</span>
+            <p className="text-[#4e584f]">
+              <code>Capital Contributed + Profit Share − Withdrawals</code>
+            </p>
+            <p className="text-[10px] text-[#6b746c]">Total enterprise value owned by this partner.</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 border border-[#edf1e8] space-y-1">
+            <span className="font-bold text-emerald-900">3. Liquid Cash Withdrawable</span>
+            <p className="text-[#4e584f]">
+              <code>Stake % × Available Company Capital</code>
+            </p>
+            <p className="text-[10px] text-[#6b746c]">Immediate cash claimable from available company treasury.</p>
+          </div>
+        </div>
+      </div>
+
       {/* Partners Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {partners.map((partner) => {
           const detail = partnerBalances.find((b) => b.id === partner.id);
-          const investments = detail ? detail.directInvestments + detail.outOfPocketExpenses : 0;
+          const directInvestments = detail ? detail.directInvestments : 0;
+          const outOfPocket = detail ? detail.outOfPocketExpenses : 0;
+          const totalInvested = directInvestments + outOfPocket;
           const withdrawals = detail ? detail.totalWithdrawn : 0;
           const allocatedProfit = detail ? detail.allocatedProfit : 0;
+          const stakePercent = detail ? detail.stakePercent : 0;
+          const stakeAmount = detail ? detail.stakeAmount : 0;
           const withdrawableAmount = detail ? detail.withdrawableAmount : 0;
-          const liquidCashWithdrawable = detail ? detail.liquidCashWithdrawable : 0;
-          const tiedUpInStock = detail ? detail.tiedUpInStock : 0;
+          const stockBackedStake = detail ? detail.stockBackedStake : 0;
           const payableAmount = detail ? detail.payableAmount : 0;
           const status = detail ? detail.status : "SETTLED";
           const isActive = partner.isActive !== false;
@@ -97,7 +204,7 @@ export function PartnersClient({
                 !isActive ? "opacity-60 bg-slate-50" : ""
               }`}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex size-10 items-center justify-center rounded-full bg-[#edf1e8] font-bold text-[#3f563f]">
                     {partner.name.charAt(0).toUpperCase()}
@@ -115,90 +222,100 @@ export function PartnersClient({
                   </div>
                 </div>
 
-                {isActive && (
-                  <button
-                    title="Remove Partner"
-                    onClick={() => handleRemovePartner(partner.id, partner.name)}
-                    disabled={deactivatingPartnerId === partner.id}
-                    className="inline-flex items-center gap-1 rounded-md p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                  >
-                    {deactivatingPartnerId === partner.id ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="size-4" />
-                    )}
-                  </button>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-[#edf1e8] px-2.5 py-1 text-xs font-bold text-[#263326] border border-[#d8ded2]">
+                    {stakePercent.toFixed(1)}% Stake
+                  </span>
+                  {isActive && (
+                    <button
+                      title="Remove Partner"
+                      onClick={() => handleRemovePartner(partner.id, partner.name)}
+                      disabled={deactivatingPartnerId === partner.id}
+                      className="inline-flex items-center gap-1 rounded-md p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                    >
+                      {deactivatingPartnerId === partner.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3.5" />
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="border-t border-[#edf1e8] pt-3 grid grid-cols-2 gap-2 text-xs">
+              {/* Total Stake Card */}
+              <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] flex justify-between items-center">
                 <div>
-                  <span className="text-[#8a948b]">Invested in Stock</span>
-                  <p className="font-bold text-emerald-900 mt-0.5">₹{investments.toLocaleString()}</p>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6b746c]">
+                    Total Stake Amount (Equity)
+                  </span>
+                  <p className="text-lg font-bold text-[#20231f] mt-0.5">
+                    ₹{Math.round(stakeAmount).toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-right text-xs">
+                  <span className="text-[#8a948b]">Profit Share</span>
+                  <p className="font-bold text-blue-900 mt-0.5">
+                    +₹{Math.round(allocatedProfit).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs border-t border-[#edf1e8] pt-3">
+                <div>
+                  <span className="text-[#8a948b]">Capital Injected</span>
+                  <p className="font-bold text-emerald-900 mt-0.5">₹{totalInvested.toLocaleString()}</p>
                 </div>
                 <div>
-                  <span className="text-[#8a948b]">Drawn / Reimbursed</span>
+                  <span className="text-[#8a948b]">Total Withdrawn</span>
                   <p className="font-bold text-rose-800 mt-0.5">₹{withdrawals.toLocaleString()}</p>
                 </div>
               </div>
 
-              <div className="border-t border-[#edf1e8] pt-2 text-xs flex justify-between items-center">
-                <span className="text-[#6b746c]">Allocated Profit Share</span>
-                <span className="font-semibold text-blue-900">
-                  ₹{Math.round(allocatedProfit).toLocaleString()}{" "}
-                  <span className="text-[10px] text-[#6b746c]">({detail?.profitSharePercent.toFixed(1)}%)</span>
-                </span>
-              </div>
-
-              {/* Settlement Balance Status Card */}
-              <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] space-y-2 text-xs">
+              {/* Live Treasury Withdrawal Breakdown */}
+              <div className="rounded-lg bg-emerald-50/50 p-3 border border-emerald-200 space-y-2 text-xs">
                 <div className="flex justify-between items-center">
-                  <span className="font-semibold text-[#4e584f]">Settlement Status</span>
-                  {status === "LOCKED_IN_STOCK" && (
-                    <span className="inline-flex items-center gap-1 font-bold text-amber-950 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
-                      <Package className="size-3 text-amber-800" />
-                      ₹{Math.round(tiedUpInStock).toLocaleString()} Tied in Stock
-                    </span>
-                  )}
-                  {status === "PARTIALLY_RECOVERED" && (
-                    <span className="inline-flex items-center gap-1 font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                      <ArrowUp className="size-3" />
-                      Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
-                    </span>
-                  )}
-                  {status === "WITHDRAWABLE" && (
-                    <span className="inline-flex items-center gap-1 font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                      <ArrowUp className="size-3" />
-                      Can Withdraw ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
-                    </span>
-                  )}
-                  {status === "PAYABLE_TO_COMPANY" && (
-                    <span className="inline-flex items-center gap-1 font-bold text-rose-900 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
-                      <ArrowDown className="size-3" />
-                      Owes Company ₹{Math.round(payableAmount).toLocaleString()}
-                    </span>
-                  )}
-                  {status === "SETTLED" && (
-                    <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                      Settled ₹0
-                    </span>
-                  )}
+                  <span className="font-bold text-emerald-950">Current Liquid Cash Claim</span>
+                  <span className="font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                    ₹{Math.round(withdrawableAmount).toLocaleString()}
+                  </span>
                 </div>
-                {status === "PARTIALLY_RECOVERED" && (
-                  <div className="space-y-1.5 pt-1.5 border-t border-[#edf1e8] text-[11px] text-[#6b746c]">
-                    <div className="flex justify-between items-center">
-                      <span>Available Liquid Profit:</span>
-                      <span className="font-bold text-emerald-900">
-                        ₹{Math.round(liquidCashWithdrawable).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span>Capital in Warehouse Stock:</span>
-                      <span className="font-semibold text-amber-900">₹{Math.round(tiedUpInStock).toLocaleString()}</span>
-                    </div>
+                {stockBackedStake > 0.01 && (
+                  <div className="flex justify-between items-center text-[10px] text-amber-900 pt-1.5 border-t border-emerald-100">
+                    <span>📦 Warehouse Stock Cushion:</span>
+                    <span className="font-bold">₹{Math.round(stockBackedStake).toLocaleString()}</span>
+                  </div>
+                )}
+                {payableAmount > 0.01 && (
+                  <div className="flex justify-between items-center text-[10px] text-rose-900 pt-1.5 border-t border-rose-200">
+                    <span>⚠️ Deficit to Pay Back:</span>
+                    <span className="font-bold">₹{Math.round(payableAmount).toLocaleString()}</span>
                   </div>
                 )}
               </div>
+
+              {isActive && (
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setEditingTransaction({ partnerId: partner.id, type: "WITHDRAWAL", amount: 0, description: "", method: "BANK_TRANSFER", occurredAt: new Date() } as any);
+                      setIsModalOpen(true);
+                    }}
+                    className="flex-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-800 hover:bg-rose-100 text-center transition"
+                  >
+                    Withdraw Cash
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingTransaction({ partnerId: partner.id, type: "ADDITIONAL_INVESTMENT", amount: 0, description: "", method: "BANK_TRANSFER", occurredAt: new Date() } as any);
+                      setIsModalOpen(true);
+                    }}
+                    className="flex-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 text-center transition"
+                  >
+                    + Invest Capital
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}

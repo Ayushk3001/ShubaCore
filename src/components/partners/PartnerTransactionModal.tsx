@@ -47,7 +47,7 @@ export function PartnerTransactionModal({
   const isEditing = Boolean(transaction);
   const isWithdrawalOrReimburse = txType === "WITHDRAWAL" || txType === "REIMBURSEMENT";
   const currentPartnerBalance = partnerBalances.find((p) => p.id === selectedPartnerId);
-  const availableLiquidCash = currentPartnerBalance ? currentPartnerBalance.liquidCashWithdrawable : 0;
+  const availableLiquidCash = currentPartnerBalance ? currentPartnerBalance.withdrawableAmount : 0;
   const isExceedingWithdrawal = isWithdrawalOrReimburse && amount > availableLiquidCash + 0.01;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -59,9 +59,9 @@ export function PartnerTransactionModal({
       setError(
         `Withdrawal of ₹${amount.toLocaleString("en-IN")} exceeds ${
           currentPartnerBalance?.name || "the partner"
-        }'s available liquid cash of ₹${availableLiquidCash.toLocaleString(
+        }'s available withdrawable balance of ₹${availableLiquidCash.toLocaleString(
           "en-IN"
-        )}. The rest of their equity is preserved in warehouse stock.`
+        )}.`
       );
       setLoading(false);
       return;
@@ -139,6 +139,31 @@ export function PartnerTransactionModal({
             </select>
           </div>
 
+          {currentPartnerBalance && isWithdrawalOrReimburse && (
+            <div className="rounded-lg bg-[#f8faf6] p-3 border border-[#edf1e8] text-xs space-y-1.5">
+              <div className="flex justify-between items-center text-[#20231f]">
+                <span className="font-semibold">
+                  Partner Stake ({currentPartnerBalance.stakePercent.toFixed(1)}% Ownership):
+                </span>
+                <span className="font-bold">₹{Math.round(currentPartnerBalance.stakeAmount).toLocaleString("en-IN")}</span>
+              </div>
+              <div className="flex justify-between items-center text-[#4e584f] text-[11px]">
+                <span>Immediate Liquid Cash Available:</span>
+                <span className="font-bold text-emerald-900">
+                  ₹{Math.round(currentPartnerBalance.withdrawableAmount).toLocaleString("en-IN")}
+                </span>
+              </div>
+              {currentPartnerBalance.stockBackedStake > 0.01 && (
+                <div className="flex justify-between items-center text-[#6b746c] text-[10px] pt-1 border-t border-[#edf1e8]">
+                  <span>Preserved in Warehouse Inventory:</span>
+                  <span className="font-medium text-amber-900">
+                    ₹{Math.round(currentPartnerBalance.stockBackedStake).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[#4e584f]">Transaction Type *</label>
@@ -182,9 +207,9 @@ export function PartnerTransactionModal({
 
           {isExceedingWithdrawal && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
-              <p className="font-bold">⚠️ Exceeds Available Liquid Cash</p>
+              <p className="font-bold">⚠️ Exceeds Available Liquid Treasury</p>
               <p className="text-[11px] mt-0.5 text-amber-800">
-                {currentPartnerBalance?.name || "This partner"} can only withdraw up to <strong>₹{availableLiquidCash.toLocaleString("en-IN")}</strong> in cash. The remaining capital is preserved in warehouse stock.
+                {currentPartnerBalance?.name || "This partner"} can only withdraw up to <strong>₹{availableLiquidCash.toLocaleString("en-IN")}</strong> from currently available company cash.
               </p>
             </div>
           )}
